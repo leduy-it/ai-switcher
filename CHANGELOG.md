@@ -5,6 +5,22 @@ All notable changes to **AI Account Switcher** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.3] - 2026-10-08
+
+### Added
+
+- **Shared Codex sessions across CLI profiles and Desktop.** OAuth profiles keep separate credentials
+  while using the default Codex session catalog, including archived history and merged session indexes.
+- **One-click quota overlay.** A top-level sidebar control shows or hides the always-on-top quota panel;
+  the full account details remain available in the main window.
+- **Import Codex OAuth accounts from `auth.json`.** Imports create private per-account profiles and
+  show the email when it is available in the token claims. Duplicate checks use the login email/user
+  identity so distinct users in a shared workspace are not mistaken for the same account.
+- **Session email attribution in Usage.** Session rows show the account email when Claude markers or
+  Codex creator metadata can be matched to a local OAuth profile.
+- **Michael Le (duyle) Profiles theme.** A blue theme and matching profile logo can be selected in
+  Settings; the original theme and logo remain available with Hoàng Phan's attribution.
+
 ## [0.11.2] - 2026-10-04
 
 ### Fixed

@@ -89,6 +89,8 @@ export interface Account {
   id: string;
   toolId: ToolId;
   name: string;
+  /** Login email extracted from Codex OAuth tokens when the auth file includes it. */
+  accountEmail?: string | null;
   state: AccountState;
   fingerprint: string;
   createdAt: string;
@@ -286,6 +288,12 @@ export interface AddAccountInput {
   launcher?: string;
 }
 
+export interface ImportCodexAccountInput {
+  name: string;
+  launcher: string;
+  authFilePath: string;
+}
+
 export interface AddApiAccountInput {
   toolId: ToolId;
   name: string;
@@ -433,6 +441,7 @@ export interface SessionUsage {
   id: string;
   date: string;
   model: string;
+  accountEmail?: string | null;
   tokens: TokenBreakdown;
   costUsd: number | null;
 }

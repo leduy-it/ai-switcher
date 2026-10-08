@@ -2,7 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { OverlayApp } from "./OverlayApp";
+import { applyProfileTheme, readProfileTheme } from "./theme";
 import "./styles.css";
+
+applyProfileTheme(readProfileTheme());
 
 /** Both windows load this same bundle; the window label decides which app to mount.
  *  `#overlay` in the URL is the browser-dev fallback (no Tauri metadata there). */

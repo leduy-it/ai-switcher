@@ -3,9 +3,10 @@ use crate::models::{
     ApiGatewayConfig, ApiGatewayKey, ApiGatewayServerState, ApiGatewaySnapshot, ApiProvider,
     ApiUsageReport, AppSnapshot, AutoSwitchSetting, ClaudeOrgRecord, CreateApiGatewayKeyInput,
     CreateApiGatewayKeyResult, CreateVirtualApiAccountInput, DeleteApiGatewayComboInput,
-    DeleteApiGatewayKeyInput, DetectionReport, OverlayRect, OverlaySettings, QuotaInfo,
-    RenameAccountInput, SaveApiGatewayComboInput, SetAccountHiddenInput, SetApiGatewayAccountInput,
-    SetLauncherInput, SetToolSetupInput, SetWeeklyLockInput, StartApiGatewayInput,
+    DeleteApiGatewayKeyInput, DetectionReport, ImportCodexAccountInput, OverlayRect,
+    OverlaySettings, QuotaInfo, RenameAccountInput, SaveApiGatewayComboInput,
+    SetAccountHiddenInput, SetApiGatewayAccountInput, SetLauncherInput, SetToolSetupInput,
+    SetWeeklyLockInput, StartApiGatewayInput,
     SwitchAccountInput, ToolId, ToolStatus, UsageOrgLabel, UsageReport, WeeklyLock,
 };
 use crate::quota::{read_claude_profile, read_quota, ClaudeProfileIdentity};
@@ -458,6 +459,7 @@ impl ManagedState {
                     id,
                     tool_id: input.tool_id.clone(),
                     name,
+                    account_email: None,
                     state: AccountState::Idle,
                     fingerprint: "api-local".to_string(),
                     created_at: timestamp.clone(),
@@ -1726,6 +1728,135 @@ impl ManagedState {
         self.create_profile_account(app, input)
     }
 
+    /// Import an existing Codex OAuth auth.json into a new isolated Switcher profile.
+    /// The source is only read; the copied credential is stored with owner-only permissions.
+    pub fn import_codex_account(&self, input: ImportCodexAccountInput) -> Result<AppSnapshot> {
+        let raw_launcher = input.launcher.trim();
+        if raw_launcher.is_empty() {
+            anyhow::bail!("A custom command is required (e.g. codex-work)");
+        }
+        let metadata = std::fs::metadata(&input.auth_file_path)
+            .context("Couldn't read the selected auth.json file")?;
+        if !metadata.is_file() {
+            anyhow::bail!("Select a Codex auth.json file");
+        }
+        if metadata.len() > 1024 * 1024 {
+            anyhow::bail!("The selected auth.json file is larger than expected");
+        }
+        let raw_auth = std::fs::read_to_string(&input.auth_file_path)
+            .context("Couldn't read the selected auth.json file")?;
+        let auth: serde_json::Value = serde_json::from_str(&raw_auth)
+            .context("The selected file is not valid Codex auth.json JSON")?;
+        let tokens = auth
+            .get("tokens")
+            .context("The selected file doesn't contain Codex OAuth tokens")?;
+        for key in ["access_token", "refresh_token"] {
+            if !tokens
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|token| !token.trim().is_empty())
+            {
+                anyhow::bail!("The selected file is missing a Codex OAuth {key}");
+            }
+        }
+        let account_id = crate::quota::codex_account_id_from_auth(&auth);
+        let user_id = crate::quota::codex_user_id_from_auth(&auth);
+        let email = crate::quota::codex_account_email_from_auth(&auth);
+
+        validate_name(&ToolId::Codex, None, &input.name, self)?;
+        let id = Uuid::new_v4().to_string();
+        let launcher = self.validated_launcher(&ToolId::Codex, &id, raw_launcher)?;
+        let (default_dir, binary_path) = {
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let default_dir = configured_default_config_dir(&data, &ToolId::Codex)
+                .context("CLI setup is ambiguous — choose Codex's default config folder first")?;
+            let binary_path = configured_binary_path(&data, &ToolId::Codex)
+                .context("CLI setup is ambiguous — choose the Codex binary first")?;
+            if codex_identity_exists(
+                &self.store,
+                &data,
+                &default_dir,
+                account_id.as_deref(),
+                user_id.as_deref(),
+                email.as_deref(),
+            ) {
+                anyhow::bail!("This Codex account is already added");
+            }
+            (default_dir, binary_path)
+        };
+        let name = normalized_or_default_name(&ToolId::Codex, &input.name, self)?;
+
+        let profile = create_profile_with_default(&ToolId::Codex, &self.store, &id, &default_dir)?;
+        if let Err(error) = write_private_codex_auth(&profile, raw_auth.as_bytes()) {
+            let _ = delete_account_files(&ToolId::Codex, &self.store, &id);
+            return Err(error).context("Couldn't copy Codex credentials into the new profile");
+        }
+        if let Err(error) = write_launcher(
+            &ToolId::Codex,
+            &self.store,
+            &id,
+            &launcher,
+            &binary_path,
+        ) {
+            let _ = delete_account_files(&ToolId::Codex, &self.store, &id);
+            return Err(error).context("Couldn't create the account's custom command");
+        }
+
+        let timestamp = now();
+        let account = Account {
+            id: id.clone(),
+            tool_id: ToolId::Codex,
+            name,
+            account_email: email,
+            state: AccountState::Idle,
+            fingerprint: format!("profile:{id}"),
+            created_at: timestamp.clone(),
+            updated_at: timestamp,
+            last_used_at: None,
+            quota: Some(read_quota(&ToolId::Codex, &profile)),
+            launcher_command: Some(launcher.clone()),
+            is_default: false,
+            hidden: false,
+            weekly_lock: None,
+            avatar_url: None,
+            api_provider: None,
+        };
+        let save_result = {
+            let mut data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            if codex_identity_exists(
+                &self.store,
+                &data,
+                &default_dir,
+                account_id.as_deref(),
+                user_id.as_deref(),
+                account.account_email.as_deref(),
+            ) {
+                Err(anyhow::anyhow!("This Codex account is already added"))
+            } else {
+                data.accounts.push(account);
+                match self.store.save(&data) {
+                    Ok(()) => Ok(()),
+                    Err(error) => {
+                        data.accounts.retain(|saved| saved.id != id);
+                        Err(error)
+                    }
+                }
+            }
+        };
+        if let Err(error) = save_result {
+            let _ = remove_launcher(&launcher);
+            let _ = delete_account_files(&ToolId::Codex, &self.store, &id);
+            return Err(error);
+        }
+        self.snapshot()
+    }
+
     /// Save the Antigravity IDE account currently logged in: capture the token from the default
     /// state.vscdb. The user must ensure the IDE is logged into the exact account they want to save.
     fn create_antigravity_account(&self, input: AddAccountInput) -> Result<AppSnapshot> {
@@ -1781,6 +1912,7 @@ impl ManagedState {
                 id,
                 tool_id: ToolId::Antigravity,
                 name,
+                account_email: None,
                 state: AccountState::Idle,
                 fingerprint,
                 created_at: timestamp.clone(),
@@ -1852,6 +1984,7 @@ impl ManagedState {
                 id: id.clone(),
                 tool_id: input.tool_id.clone(),
                 name,
+                account_email: None,
                 state: AccountState::NeedsLogin,
                 fingerprint: format!("profile:{id}"),
                 created_at: timestamp.clone(),
@@ -1964,6 +2097,7 @@ impl ManagedState {
                 id,
                 tool_id: input.tool_id.clone(),
                 name,
+                account_email: None,
                 state: AccountState::Idle,
                 fingerprint: "api".to_string(),
                 created_at: timestamp.clone(),
@@ -2689,6 +2823,67 @@ fn account_config_dir_with_default(
     }
 }
 
+fn codex_identity_exists(
+    store: &Store,
+    data: &StoredState,
+    default_config_dir: &std::path::Path,
+    account_id: Option<&str>,
+    user_id: Option<&str>,
+    email: Option<&str>,
+) -> bool {
+    data.accounts
+        .iter()
+        .filter(|account| account.tool_id == ToolId::Codex && account.api_provider.is_none())
+        .any(|account| {
+            let config_dir = account_config_dir_with_default(store, account, default_config_dir);
+            let current_email = crate::quota::codex_account_email(&config_dir);
+            let current_user_id = crate::quota::codex_user_id(&config_dir);
+            if let (Some(candidate), Some(current)) = (email, current_email.as_deref()) {
+                if current.eq_ignore_ascii_case(candidate) {
+                    return true;
+                }
+                // A workspace/account id can cover several distinct user logins. Compare the
+                // per-user id when both emails are known and different; never dedupe on workspace
+                // id alone in that case.
+                return user_id.is_some_and(|candidate| {
+                    current_user_id.as_deref() == Some(candidate)
+                });
+            }
+            if user_id.is_some_and(|candidate| {
+                current_user_id.as_deref() == Some(candidate)
+            }) {
+                return true;
+            }
+            // Only fall back to the shared workspace id when neither profile exposed a user id
+            // or email. Otherwise different people in the same workspace look like duplicates.
+            user_id.is_none()
+                && current_user_id.is_none()
+                && email.is_none()
+                && current_email.is_none()
+                && account_id.is_some_and(|candidate| {
+                    crate::quota::codex_account_id(&config_dir).as_deref() == Some(candidate)
+                })
+        })
+}
+
+fn write_private_codex_auth(profile: &std::path::Path, contents: &[u8]) -> Result<()> {
+    let path = profile.join("auth.json");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .with_context(|| format!("Couldn't create {}", path.display()))?;
+    use std::io::Write;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    Ok(())
+}
+
 fn resolved_default_config_dir(data: &StoredState, tool_id: &ToolId) -> std::path::PathBuf {
     configured_default_config_dir(data, tool_id).unwrap_or_else(|| default_config_dir(tool_id))
 }
@@ -2817,6 +3012,7 @@ fn migrate_defaults(accounts: &mut Vec<Account>) {
             id: default_id,
             tool_id: tool_id.clone(),
             name: "Machine default".to_string(),
+            account_email: None,
             state: AccountState::Idle,
             fingerprint: "default".to_string(),
             created_at: timestamp.clone(),
@@ -2881,6 +3077,15 @@ fn build_snapshot(
                     .cmp(&a.is_default)
                     .then_with(|| a.name.cmp(&b.name))
             });
+            if matches!(tool_id, ToolId::Codex) {
+                let default_dir = configured_default_config_dir(data, &tool_id)
+                    .unwrap_or_else(|| default_config_dir(&tool_id));
+                for account in accounts.iter_mut() {
+                    let config_dir =
+                        account_config_dir_with_default(store, account, &default_dir);
+                    account.account_email = crate::quota::codex_account_email(&config_dir);
+                }
+            }
             // Antigravity: attach the Google avatar (account identity) for the UI to display.
             if matches!(tool_id, ToolId::Antigravity) {
                 for account in accounts.iter_mut() {
@@ -3582,6 +3787,7 @@ mod tests {
             id: id.to_string(),
             tool_id: ToolId::Claude,
             name: id.to_string(),
+            account_email: None,
             state: AccountState::Idle,
             fingerprint: format!("profile:{id}"),
             created_at: "2026-09-14T00:00:00Z".to_string(),

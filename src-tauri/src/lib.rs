@@ -16,9 +16,10 @@ use app_state::ManagedState;
 use models::{
     AddAccountInput, AddApiAccountInput, ApiUsageReport, AppSnapshot, CreateApiGatewayKeyInput,
     CreateApiGatewayKeyResult, CreateVirtualApiAccountInput, DeleteApiGatewayComboInput,
-    DeleteApiGatewayKeyInput, DetectionReport, OverlayRect, OverlaySettings, PrimeNowInput,
-    RenameAccountInput, SaveApiGatewayComboInput, SetAccountHiddenInput, SetApiGatewayAccountInput,
-    SetLauncherInput, SetToolSetupInput, SetWeeklyLockInput, StartApiGatewayInput,
+    DeleteApiGatewayKeyInput, DetectionReport, ImportCodexAccountInput, OverlayRect,
+    OverlaySettings, PrimeNowInput, RenameAccountInput, SaveApiGatewayComboInput,
+    SetAccountHiddenInput, SetApiGatewayAccountInput, SetLauncherInput, SetToolSetupInput,
+    SetWeeklyLockInput, StartApiGatewayInput,
     SwitchAccountInput, ToolId, UsageReport,
 };
 use tauri::{Emitter, Manager, State};
@@ -71,6 +72,23 @@ fn add_account(
     let snapshot = state.add_account(&app, input).map_err(display_error)?;
     tray::rebuild(&app);
     Ok(snapshot)
+}
+
+#[tauri::command]
+async fn import_codex_account(
+    app: tauri::AppHandle,
+    input: ImportCodexAccountInput,
+) -> Result<AppSnapshot, String> {
+    let app2 = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        app2.state::<ManagedState>()
+            .import_codex_account(input)
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    tray::rebuild(&app);
+    result
 }
 
 #[tauri::command]
@@ -496,6 +514,7 @@ pub fn run() {
             refresh_tool,
             refresh_account,
             add_account,
+            import_codex_account,
             add_api_account,
             fetch_gateway_models,
             rename_account,

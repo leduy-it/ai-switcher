@@ -15,8 +15,9 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/hoangpm96/a
 ## Features
 
 - **One window for every tool.** Log in, switch, rename, and remove accounts per tool.
-- **Menu-bar quick switch.** A tray icon in the macOS menu bar lists your Claude & Codex accounts (with quota % and plan) so you can switch without opening the window. Closing the window hides the app to the tray; it keeps polling quota in the background.
+- **Menu-bar quick switch.** A tray icon in the macOS menu bar lists your Claude & Codex accounts (with quota % and plan) so you can switch without opening the window. The main sidebar also has a one-click quota overlay toggle. Closing the window hides the app to the tray; it keeps polling quota in the background.
 - **Quota at a glance.** Reads 5-hour / weekly usage for Claude & Codex and per-model quota for Antigravity, shows your **subscription plan** (Plus / Pro / Max) when the API reports it, and exposes Codex usage-limit reset credits in a per-account modal.
+- **Appearance profiles.** Keep the original visual theme or choose the blue **Michael Le (duyle) Profiles** theme, with a matching logo and the original author credit.
 - **Per-tool auto-switch.** Configure separately for Claude and Codex — the bare command falls back to another account when the active one nears its quota.
 - **Usage & cost tab.** Token usage and estimated cost per tool, plus an aggregated **All** view across tools, charted over a selectable date range.
 - **Local API gateway.** Expose Claude/Codex subscription accounts through a local OpenAI/Anthropic-compatible server with API keys, model combos, fallback rotation, cooldown handling, and gateway usage tracking.
@@ -25,8 +26,10 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/hoangpm96/a
 ### Claude Code & Codex (CLI)
 
 - Each account logs into its own isolated config dir and gets a **dedicated command** (`claude-<name>`, `codex-<name>`) so you can run several accounts in parallel across terminals.
+- Codex accounts can also be added from an existing OAuth `auth.json`; the app validates the OAuth tokens, copies them into a private per-account profile, and shows the email when the token exposes it. The selected source file is left untouched.
 - The bare `claude` / `codex` command **follows the account you select** (via a shell hook + an "active profile" file). Run `aisw` in an already-open terminal to sync it to the latest selection.
-- Chat sessions are **shared across accounts** in the same project, so you can resume work regardless of which account created it.
+- Chat sessions are **shared across accounts** in the same project, so you can resume work regardless of which account created it. Codex OAuth profiles keep their own `CODEX_HOME` and `auth.json`, while their launchers use the documented [`CODEX_SQLITE_HOME`](https://learn.chatgpt.com/docs/config-file/environment-variables) override to share the thread catalog with Codex Desktop. Session rollouts, archived rollouts, prompt history, and `session_index.jsonl` are linked to the default Codex home; existing index rows are merged before linking. API/proxy profiles remain isolated. A user-defined `sqlite_home` setting takes precedence over the environment variable and should point every profile at the same state directory.
+- The Codex shell hook also exports `CODEX_SQLITE_HOME` for subscription profiles, so legacy `CODEX_HOME` aliases inherit the shared session catalog. API/proxy launchers explicitly clear that override.
 - API/proxy accounts can point Claude Code or Codex at an external gateway, with one pinned model per generated launcher.
 
 ### Local API Gateway

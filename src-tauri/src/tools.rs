@@ -26,6 +26,55 @@ pub fn default_config_dir(tool_id: &ToolId) -> PathBuf {
     }
 }
 
+/// The machine's default Codex home is the shared session and SQLite-state root. OAuth profiles
+/// keep their own CODEX_HOME directories (and auth.json files), but use this home for history.
+fn codex_default_home(store: &Store) -> PathBuf {
+    store
+        .load()
+        .ok()
+        .and_then(|state| {
+            state
+                .tool_setups
+                .get(ToolId::Codex.as_str())
+                .and_then(|setup| setup.default_config_dir.clone())
+        })
+        .unwrap_or_else(|| default_config_dir(&ToolId::Codex))
+}
+
+/// Existing users may have profile homes such as `~/.codex2` that were created outside AI Switcher.
+/// Share their transcript/index files too, while leaving API-key profiles and credentials alone.
+fn legacy_codex_profile_dirs(default_config_dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(home_dir()) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            if name == ".codex" || !name.starts_with(".codex") {
+                return None;
+            }
+            let path = entry.path();
+            let meta = fs::symlink_metadata(&path).ok()?;
+            if !meta.is_dir() || path == default_config_dir || path.join("api_key").exists() {
+                return None;
+            }
+            let looks_like_codex_home = [
+                "auth.json",
+                "sessions",
+                "archived_sessions",
+                "session_index.jsonl",
+                "state_5.sqlite",
+                "thread_history_1.sqlite",
+            ]
+            .iter()
+            .any(|file| path.join(file).exists());
+            looks_like_codex_home.then_some(path)
+        })
+        .collect()
+}
+
 /// Path to the Antigravity IDE .app (to open with `open`).
 fn antigravity_ide_app() -> Option<PathBuf> {
     let app = PathBuf::from("/Applications/Antigravity IDE.app");
@@ -318,11 +367,17 @@ pub fn create_profile_with_default(
 /// Chat-session dir/file names that should be shared across a tool's accounts.
 /// The token (auth.json/keychain) is NOT among these, so quota stays per-account.
 /// - Claude: per-project transcripts in `projects/` + prompt history `history.jsonl`.
-/// - Codex: conversation rollouts in `sessions/` + prompt history `history.jsonl`.
+/// - Codex: rollouts in `sessions/` / `archived_sessions/`, plus `history.jsonl` and
+///   `session_index.jsonl`.
 fn shared_session_names(tool_id: &ToolId) -> &'static [&'static str] {
     match tool_id {
         ToolId::Claude => &["projects", "history.jsonl"],
-        ToolId::Codex => &["sessions", "history.jsonl"],
+        ToolId::Codex => &[
+            "sessions",
+            "archived_sessions",
+            "history.jsonl",
+            "session_index.jsonl",
+        ],
         // Cursor keeps chats in ~/.cursor/chats but the launcher never moves HOME, so the
         // machine's own chat history is already shared. opencode's sessions live in the profile
         // (XDG_DATA_HOME) and are deliberately kept per account.
@@ -349,11 +404,9 @@ fn shared_config_names(tool_id: &ToolId) -> &'static [&'static str] {
             "commands",
             "agents",
         ],
-        // SQLite databases are intentionally excluded: sharing a live .sqlite (+ WAL/SHM) between
-        // the default Codex process and a profile Codex process causes write-lock contention.
-        // When both run simultaneously, the profile process blocks waiting for the WAL write lock
-        // held by the default process, which causes the WebSocket initialisation to time out
-        // ("Reconnecting... 4/5"). Each account keeps its own memories and goals DBs.
+        // SQLite files are never symlinked. Normal Codex profiles select the shared runtime-state
+        // location with CODEX_SQLITE_HOME in their launcher/shell environment; memories and goals
+        // remain profile-local because sharing those live databases caused lock contention.
         ToolId::Codex => &["config.toml", "rules", "skills", "memories"],
         // Cursor: the launcher keeps the real HOME, so ~/.cursor (rules, mcp.json, model prefs)
         // is already shared — nothing to symlink. opencode: config lives in XDG_CONFIG_HOME,
@@ -372,13 +425,77 @@ fn shared_target_to(tool_id: &ToolId, name: &str, default_config_dir: &Path) -> 
 }
 
 /// Share session/history across accounts: symlink the profile's chat-session entries
-/// to the original config dir (`~/.claude`, `~/.codex`). This lets any account resume
-/// a session created by another account, even in the same project. The token stays
-/// per-profile so quotas don't mix. Idempotent — safe to call again.
+/// to the original config dir (`~/.claude`, `~/.codex`). Codex index rows are merged first so any
+/// account can resume a session created by another account, even in the same project. The token
+/// stays per-profile so quotas don't mix. Idempotent — safe to call again.
 pub fn link_shared_sessions_to(tool_id: &ToolId, profile: &Path, default_config_dir: &Path) {
+    // Codex's JSONL index is profile-local even though the rollout directory is shared. Merge its
+    // entries before turning it into a symlink so linking an existing profile cannot hide chats
+    // that were indexed only in that profile.
+    let codex_index_ready = !matches!(tool_id, ToolId::Codex)
+        || merge_codex_session_index(profile, default_config_dir);
     for name in shared_session_names(tool_id) {
+        if *name == "session_index.jsonl" && !codex_index_ready {
+            // Keep the original index if it could not be read or merged; preserving local history
+            // is safer than replacing it with a link to an incomplete shared index.
+            continue;
+        }
         link_shared_entry(tool_id, profile, name, true, default_config_dir);
     }
+}
+
+/// Append profile-local Codex session-index rows to the default home's index before linking it.
+/// Exact-line de-duplication is idempotent and preserves unknown future JSON fields. If the shared
+/// target does not exist yet, the normal link path moves the source file into place instead.
+fn merge_codex_session_index(profile: &Path, default_config_dir: &Path) -> bool {
+    if profile == default_config_dir {
+        return true;
+    }
+    let source = profile.join("session_index.jsonl");
+    let target = default_config_dir.join("session_index.jsonl");
+    let source_meta = match fs::symlink_metadata(&source) {
+        Ok(meta) => meta,
+        Err(_) => return true,
+    };
+    if source_meta.file_type().is_symlink() {
+        return fs::read_link(&source).is_ok_and(|path| path == target);
+    }
+    if !source_meta.is_file() || !target.exists() {
+        return true;
+    }
+
+    let Ok(source_text) = fs::read_to_string(&source) else {
+        return false;
+    };
+    let Ok(target_text) = fs::read_to_string(&target) else {
+        return false;
+    };
+    let mut known: std::collections::HashSet<&str> = target_text.lines().collect();
+    let additions: Vec<&str> = source_text
+        .lines()
+        .filter(|line| !line.trim().is_empty() && known.insert(line))
+        .collect();
+    if additions.is_empty() {
+        return true;
+    }
+
+    let Ok(mut output) = fs::OpenOptions::new().append(true).open(&target) else {
+        return false;
+    };
+    if !target_text.is_empty()
+        && !target_text.ends_with('\n')
+        && std::io::Write::write_all(&mut output, b"\n").is_err()
+    {
+        return false;
+    }
+    for line in additions {
+        if std::io::Write::write_all(&mut output, line.as_bytes()).is_err()
+            || std::io::Write::write_all(&mut output, b"\n").is_err()
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// Share CLI config/memory across normal OAuth profiles. This keeps account switching focused on
@@ -815,11 +932,21 @@ fn run_cursor_profile_login(command: &Path, profile: &Path) -> Result<()> {
 }
 
 /// The `export …` lines a per-account launcher needs so the CLI picks up that account only.
-fn launcher_env_body(tool_id: &ToolId, profile: &Path) -> Result<String> {
+fn launcher_env_body(
+    tool_id: &ToolId,
+    profile: &Path,
+    codex_sqlite_home: Option<&Path>,
+) -> Result<String> {
     let dir = shell_quote(&profile.to_string_lossy());
     Ok(match tool_id {
         ToolId::Claude => format!("export CLAUDE_CONFIG_DIR={dir}\n"),
-        ToolId::Codex => format!("export CODEX_HOME={dir}\n"),
+        ToolId::Codex => match codex_sqlite_home {
+            Some(sqlite_home) => format!(
+                "export CODEX_HOME={dir}\nexport CODEX_SQLITE_HOME={}\n",
+                shell_quote(&sqlite_home.to_string_lossy())
+            ),
+            None => format!("export CODEX_HOME={dir}\nunset CODEX_SQLITE_HOME\n"),
+        },
         ToolId::Opencode => format!("export XDG_DATA_HOME={dir}\n"),
         // Cursor has no config-dir variable, and overriding HOME here would break every shell
         // command the agent runs (git, ssh, npm all read HOME). Instead the token is passed in
@@ -841,7 +968,8 @@ pub fn write_launcher(
     real_binary: &Path,
 ) -> Result<()> {
     let profile = store.account_dir(tool_id, account_id);
-    let body = launcher_env_body(tool_id, &profile)?;
+    let sqlite_home = matches!(tool_id, ToolId::Codex).then(|| codex_default_home(store));
+    let body = launcher_env_body(tool_id, &profile, sqlite_home.as_deref())?;
 
     let dir = launcher_dir();
     fs::create_dir_all(&dir)?;
@@ -1034,13 +1162,19 @@ pub fn write_api_launcher(
         (ToolId::Claude, true) => " --dangerously-skip-permissions",
         _ => "",
     };
+    let sqlite_home_unset = if matches!(tool_id, ToolId::Codex) {
+        "unset CODEX_SQLITE_HOME\n"
+    } else {
+        ""
+    };
 
     let dir = launcher_dir();
     fs::create_dir_all(&dir)?;
     let path = dir.join(full_name);
     let script = format!(
-        "#!/bin/sh\n{marker}\nexport {env}={dir}\n{key}exec {bin}{model}{flag} \"$@\"\n",
+        "#!/bin/sh\n{marker}\n{sqlite_home_unset}export {env}={dir}\n{key}exec {bin}{model}{flag} \"$@\"\n",
         marker = LAUNCHER_MARKER,
+        sqlite_home_unset = sqlite_home_unset,
         env = env_name,
         dir = shell_quote(&profile.to_string_lossy()),
         key = key_export,
@@ -1091,6 +1225,10 @@ pub fn clear_active_profile(tool_id: &ToolId, store: &Store) -> Result<()> {
 /// Install (idempotently) the hook block into the shell rc so the bare command follows the selected account.
 /// Called on every switch — cheap and self-healing if the user accidentally deletes it.
 pub fn install_shell_hook(store: &Store) -> Result<()> {
+    let default_codex_home = codex_default_home(store);
+    for profile in legacy_codex_profile_dirs(&default_codex_home) {
+        link_shared_sessions_to(&ToolId::Codex, &profile, &default_codex_home);
+    }
     let block = shell_hook_block(store);
     let home = home_dir();
     // zsh is the default shell on macOS; add bash if the user has ~/.bashrc.
@@ -1124,7 +1262,19 @@ fn shell_hook_block(store: &Store) -> String {
         \x20 if [ -r {claude} ]; then export CLAUDE_CONFIG_DIR=\"$(cat {claude})\"; else unset CLAUDE_CONFIG_DIR; fi\n\
         \x20 if [ -n \"${{AISW_OPENAI_API_KEY:-}}\" ] && [ \"${{OPENAI_API_KEY:-}}\" = \"$AISW_OPENAI_API_KEY\" ]; then unset OPENAI_API_KEY; fi\n\
         \x20 unset AISW_OPENAI_API_KEY\n\
-        \x20 if [ -r {codex} ]; then export CODEX_HOME=\"$(cat {codex})\"; if [ -r \"$CODEX_HOME/api_key\" ]; then export OPENAI_API_KEY=\"$(cat \"$CODEX_HOME/api_key\")\"; export AISW_OPENAI_API_KEY=\"$OPENAI_API_KEY\"; fi; else unset CODEX_HOME; fi\n\
+        \x20 if [ -r {codex} ]; then\n\
+        \x20   export CODEX_HOME=\"$(cat {codex})\"\n\
+        \x20   if [ -r \"$CODEX_HOME/api_key\" ]; then\n\
+        \x20     unset CODEX_SQLITE_HOME\n\
+        \x20     export OPENAI_API_KEY=\"$(cat \"$CODEX_HOME/api_key\")\"\n\
+        \x20     export AISW_OPENAI_API_KEY=\"$OPENAI_API_KEY\"\n\
+        \x20   else\n\
+        \x20     export CODEX_SQLITE_HOME={sqlite_home}\n\
+        \x20   fi\n\
+        \x20 else\n\
+        \x20   unset CODEX_HOME\n\
+        \x20   export CODEX_SQLITE_HOME={sqlite_home}\n\
+        \x20 fi\n\
         \x20 [ -n \"$1\" ] && echo \"AI Account Switcher: synced the account for this terminal.\"\n\
          }}\n\
          aisw >/dev/null 2>&1\n\
@@ -1135,6 +1285,7 @@ fn shell_hook_block(store: &Store) -> String {
         end = HOOK_END,
         claude = shell_quote(&claude_active.to_string_lossy()),
         codex = shell_quote(&codex_active.to_string_lossy()),
+        sqlite_home = shell_quote(&codex_default_home(store).to_string_lossy()),
         // Cursor and opencode are wrapped as shell FUNCTIONS instead of exported variables:
         // XDG_DATA_HOME is read by unrelated apps, and Cursor's token has no business sitting in
         // every process's environment. A function scopes both to the one command being run, and
@@ -1269,6 +1420,7 @@ mod tests {
         // Every managed CLI must be covered.
         assert!(block.contains("CLAUDE_CONFIG_DIR"));
         assert!(block.contains("CODEX_HOME"));
+        assert!(block.contains("CODEX_SQLITE_HOME"));
         assert!(block.contains("XDG_DATA_HOME"));
         assert!(block.contains("CURSOR_AUTH_TOKEN"));
         // Cursor must never write into the shared credential store from a wrapped run.
@@ -1283,13 +1435,15 @@ mod tests {
         let root = std::env::temp_dir().join(format!("aisw_launcher_{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let profile = root.join("profile with space");
+        let sqlite_home = root.join("shared sqlite with space");
         for tool_id in [
             ToolId::Claude,
             ToolId::Codex,
             ToolId::Cursor,
             ToolId::Opencode,
         ] {
-            let body = launcher_env_body(&tool_id, &profile).unwrap();
+            let sqlite = matches!(tool_id, ToolId::Codex).then_some(sqlite_home.as_path());
+            let body = launcher_env_body(&tool_id, &profile, sqlite).unwrap();
             let script = root.join(format!("{}.sh", tool_id.as_str()));
             fs::write(&script, format!("#!/bin/sh\n{body}exec true \"$@\"\n")).unwrap();
             let output = Command::new("sh").arg("-n").arg(&script).output().unwrap();
@@ -1301,10 +1455,10 @@ mod tests {
             );
         }
         // Cursor must never persist into the shared credential store from a launcher run.
-        let cursor = launcher_env_body(&ToolId::Cursor, &profile).unwrap();
+        let cursor = launcher_env_body(&ToolId::Cursor, &profile, None).unwrap();
         assert!(cursor.contains("AGENT_CLI_CREDENTIAL_STORE=memory"));
         assert!(!cursor.contains("export HOME"));
-        assert!(launcher_env_body(&ToolId::Antigravity, &profile).is_err());
+        assert!(launcher_env_body(&ToolId::Antigravity, &profile, None).is_err());
         let _ = fs::remove_dir_all(root);
     }
 

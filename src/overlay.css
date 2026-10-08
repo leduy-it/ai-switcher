@@ -16,6 +16,10 @@ html.ovWindow #root {
 .ovRoot {
   /* --ov-opacity is set inline: the idle level, or the hover level while pointed at. */
   --ov-opacity: 1;
+  --ov-accent: var(--accent);
+  --ov-accent-bright: var(--accent-bright);
+  --ov-accent-rgb: var(--accent-rgb);
+  --ov-bg: rgba(16, 14, 12, 0.92);
   --ov-text: #f4efe8;
   --ov-text-2: #b7ac9d;
   --ov-text-3: #8a8073;
@@ -31,7 +35,7 @@ html.ovWindow #root {
   overflow: hidden;
   border-radius: 12px;
   border: 1px solid var(--ov-line);
-  background: rgba(16, 14, 12, 0.92);
+  background: var(--ov-bg);
   -webkit-backdrop-filter: blur(18px) saturate(150%);
   backdrop-filter: blur(18px) saturate(150%);
   /* Fading the whole panel (not just its background) is what makes the app underneath readable
@@ -44,6 +48,14 @@ html.ovWindow #root {
   -webkit-font-smoothing: antialiased;
   user-select: none;
   cursor: default;
+}
+
+:root[data-profile-theme="michael-blue"] .ovRoot {
+  --ov-bg: rgba(8, 18, 32, 0.94);
+  --ov-text: #edf5ff;
+  --ov-text-2: #b2c5dc;
+  --ov-text-3: #8196b1;
+  --ov-line: rgba(170, 202, 240, 0.15);
 }
 
 /* ---------- title bar ---------- */
@@ -86,8 +98,8 @@ html.ovWindow #root {
 }
 
 .ovIcon.on {
-  background: rgba(251, 106, 26, 0.18);
-  color: #fb8a2a;
+  background: rgba(var(--ov-accent-rgb), 0.18);
+  color: var(--ov-accent-bright);
 }
 
 .ovIcon:disabled {
@@ -302,7 +314,7 @@ html.ovWindow #root {
 }
 
 .ovPick.on {
-  background: rgba(251, 106, 26, 0.14);
+  background: rgba(var(--ov-accent-rgb), 0.14);
 }
 
 .ovPickBox {
@@ -314,7 +326,7 @@ html.ovWindow #root {
   height: 13px;
   border: 1px solid var(--ov-line);
   border-radius: 4px;
-  color: #fb8a2a;
+  color: var(--ov-accent-bright);
 }
 
 .ovOpt {
@@ -327,13 +339,13 @@ html.ovWindow #root {
 }
 
 .ovOpt input[type="checkbox"] {
-  accent-color: #fb6a1a;
+  accent-color: var(--ov-accent);
   margin: 0;
 }
 
 .ovSlider input[type="range"] {
   flex: 1;
-  accent-color: #fb6a1a;
+  accent-color: var(--ov-accent);
 }
 
 /* ---------- resize grip ---------- */

@@ -93,8 +93,11 @@ export function UsageView() {
 
       <p className="usageLead">
         Token usage &amp; estimated cost from Claude Code and Codex local logs on this machine,
-        totaled per tool across all accounts. The Accounts view splits Claude usage per
-        subscription login. Antigravity has no token logs and is not shown.
+        totaled per tool across all accounts. Session rows show the login email when the session
+        metadata identifies it; for resumed Codex sessions, this is the original creator and may
+        differ from the account used for later turns. The Accounts view splits Claude usage per
+        subscription login.
+        Antigravity has no token logs and is not shown.
       </p>
 
       {error && (
@@ -803,6 +806,7 @@ function SessionTable({ sessions }: { sessions: SessionUsage[] }) {
           <tr>
             <th>Date</th>
             <th>Session</th>
+            <th>Account email</th>
             <th>Model</th>
             <th className="num">Tokens</th>
             <th className="num">Cost</th>
@@ -813,6 +817,7 @@ function SessionTable({ sessions }: { sessions: SessionUsage[] }) {
             <tr key={s.id + s.date}>
               <td>{s.date}</td>
               <td><code>{s.id.slice(0, 8)}</code></td>
+              <td>{s.accountEmail ?? "Unknown"}</td>
               <td><code>{s.model}</code></td>
               <td className="num">{formatTokens(total(s.tokens))}</td>
               <td className="num">{formatUsd(s.costUsd)}</td>
