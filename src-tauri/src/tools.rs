@@ -501,6 +501,40 @@ fn merge_codex_session_index(profile: &Path, default_config_dir: &Path) -> bool 
 /// Share CLI config/memory across normal OAuth profiles. This keeps account switching focused on
 /// credentials/quota while user settings, skills, rules, and Codex memory stay consistent.
 pub fn link_shared_config_to(tool_id: &ToolId, profile: &Path, default_config_dir: &Path) {
+    if matches!(tool_id, ToolId::Codex) && profile != default_config_dir {
+        // Desktop project/sidebar state lives under CODEX_HOME, independently of the thread DB.
+        // Preserve every old profile copy before sharing the main catalog's UI state.
+        let name = ".codex-global-state.json";
+        let source = profile.join(name);
+        let target = default_config_dir.join(name);
+        if source.is_file()
+            && fs::symlink_metadata(&source).is_ok_and(|m| !m.file_type().is_symlink())
+            && target.exists()
+        {
+            let backup = profile.join(format!(
+                "{name}.before-desktop-sharing-{}",
+                uuid::Uuid::new_v4()
+            ));
+            if fs::rename(&source, &backup).is_err() {
+                return;
+            }
+        }
+        if !target.exists() && !source.exists() {
+            let _ = fs::create_dir_all(default_config_dir);
+            use std::io::Write;
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            if let Ok(mut file) = options.open(&target) {
+                let _ = file.write_all(b"{}");
+            }
+        }
+        link_shared_entry(tool_id, profile, name, false, default_config_dir);
+    }
     // Remove any stale symlinks that were previously created but are no longer in the shared list
     // (e.g. memories_1.sqlite was removed to fix SQLite lock contention).
     remove_stale_shared_symlinks(tool_id, profile, default_config_dir);
@@ -754,13 +788,9 @@ pub fn launch_profile_login(
             &["auth", "login"],
             tool_id,
         ),
-        ToolId::Codex => run_profile_login_command(
-            binary_path,
-            "CODEX_HOME",
-            &profile,
-            &["login"],
-            tool_id,
-        ),
+        ToolId::Codex => {
+            run_profile_login_command(binary_path, "CODEX_HOME", &profile, &["login"], tool_id)
+        }
         // opencode reads its credentials from `$XDG_DATA_HOME/opencode/auth.json`, so pointing
         // XDG_DATA_HOME at the profile makes the login land inside it.
         ToolId::Opencode => run_profile_login_command(

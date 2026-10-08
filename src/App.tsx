@@ -1,3 +1,4 @@
+import { DesktopStatus } from "./DesktopStatus";
 import {
   AlarmClock,
   AlertTriangle,
@@ -111,7 +112,7 @@ const toolDescriptions: Record<ToolId, string> = {
   claude:
     "The bare `claude` command follows the selected account (Use button). Each account also has its own `claude-…` command to run in parallel in another terminal.",
   codex:
-    "The bare `codex` command follows the selected account (Use button). Each account also has its own `codex-…` command to run in parallel in another terminal.",
+    "The bare codex command follows the selected account. Desktop account controls apply the same profile to Codex.app or ChatGPT.app after a safe handoff; account email is confirmed separately.",
   cursor:
     "The bare `cursor-agent` command follows the selected account (Use button). Each account also has its own `cursor-agent-…` command to run in parallel in another terminal.",
   opencode:
@@ -486,6 +487,8 @@ export function App() {
         : `Now using: ${account.name} (${tool.name})`,
       tool.id === "antigravity"
         ? `Loaded account ${account.name}. Antigravity IDE is restarting to apply.`
+        : tool.id === "codex"
+        ? `CLI selected: ${account.name}. Check the updated quota and desktop status below.`
         : `Selected ${account.name}. A new terminal running \`${tool.id}\` uses it right away; in an open terminal run \`aisw\` to sync.`,
     );
 
@@ -760,6 +763,7 @@ export function App() {
               </div>
             )}
 
+            {currentTool.id === "codex" && <DesktopStatus snapshot={snapshot} onUpdate={commitSnapshot} />}
             <div className="accountGrid">
               {visibleAccounts.length === 0 ? (
                 <div className="empty">
@@ -2994,6 +2998,17 @@ function AddDialog({
   const [message, setMessage] = useState<string | null>(null);
   const [authFilePath, setAuthFilePath] = useState<string | null>(null);
   const [authFileName, setAuthFileName] = useState<string | null>(null);
+  const [authSource, setAuthSource] = useState<"paste" | "file">("paste");
+  const [authJson, setAuthJson] = useState("");
+  const [authPreview, setAuthPreview] = useState<import("./types").CodexAuthPreview | null>(null);
+  const [parsingAuth, setParsingAuth] = useState(false);
+
+  const parseCodexAuth = async (source: import("./types").CodexAuthSourceInput) => {
+    setMessage(null); setAuthPreview(null); setParsingAuth(true);
+    try { setAuthPreview(await api.parseCodexAuth(source)); }
+    catch (err) { setMessage(errorMessage(err)); }
+    finally { setParsingAuth(false); }
+  };
 
   // API-mode state.
   const [baseUrl, setBaseUrl] = useState("");
@@ -3054,6 +3069,7 @@ function AddDialog({
       if (typeof selected !== "string") return;
       setAuthFilePath(selected);
       setAuthFileName(selected.split(/[\\/]/).pop() ?? "auth.json");
+      await parseCodexAuth({ authFilePath: selected });
     } catch (err) {
       setMessage(errorMessage(err));
     }
@@ -3069,17 +3085,17 @@ function AddDialog({
       setMessage(`A custom command is required (e.g. ${launcherExample(tool.id)})`);
       return;
     }
-    if (isImport && !authFilePath) {
-      setMessage("Choose a Codex auth.json file to import");
+    if (isImport && (!authPreview || authPreview.alreadyAdded || parsingAuth)) {
+      setMessage("Parse the JSON first and choose an account that is not already added");
       return;
     }
     setSubmitting(true);
     try {
-      if (isImport && authFilePath) {
+      if (isImport) {
         await onImportCodex({
           name: name.trim(),
           launcher: launcher.trim(),
-          authFilePath,
+          ...(authSource === "paste" ? { authJson } : { authFilePath: authFilePath! }),
         });
       } else {
         await onSubmit({
@@ -3186,14 +3202,24 @@ function AddDialog({
 
         {isImport && (
           <>
-            <button type="button" className="fetchModels" onClick={chooseCodexAuthFile}>
-              <Plus />
-              {authFilePath ? "Choose another auth.json" : "Choose Codex auth.json"}
-            </button>
+            <div className="kindToggle authSourceToggle" aria-label="Credential source">
+              <button type="button" className={authSource === "paste" ? "active" : ""} disabled={parsingAuth || submitting} onClick={() => { setAuthSource("paste"); setAuthPreview(null); setMessage(null); }}>Paste JSON</button>
+              <button type="button" className={authSource === "file" ? "active" : ""} disabled={parsingAuth || submitting} onClick={() => { setAuthSource("file"); setAuthPreview(null); setMessage(null); }}>Import file</button>
+            </div>
+            {authSource === "paste" ? <>
+              <label>Codex auth.json
+                <textarea className="authJsonBox" rows={7} value={authJson} maxLength={1024 * 1024} autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false} disabled={parsingAuth || submitting} placeholder="Paste the contents of Codex auth.json here" onChange={(event) => { setAuthJson(event.target.value); setAuthPreview(null); setMessage(null); }} />
+              </label>
+              <div className="authJsonActions"><button type="button" className="fetchModels" disabled={parsingAuth || submitting || !authJson.trim()} onClick={() => void parseCodexAuth({ authJson })}>{parsingAuth ? <Loader2 className="spin" /> : <Check />}Parse JSON</button><button type="button" disabled={parsingAuth || submitting || !authJson} onClick={() => { setAuthJson(""); setAuthPreview(null); setMessage(null); }}>Clear</button></div>
+            </> : <button type="button" className="fetchModels" disabled={parsingAuth || submitting} onClick={chooseCodexAuthFile}>
+              {parsingAuth ? <Loader2 className="spin" /> : <Plus />}
+              {authFilePath ? "Choose another JSON file" : "Choose Codex auth.json"}
+            </button>}
+            {authPreview && <div className={`authJsonPreview ${authPreview.alreadyAdded ? "duplicate" : ""}`} role="status"><strong>{authPreview.email ?? "Email unavailable in this JSON"}</strong><span>{authPreview.alreadyAdded ? "This login is already added. Use its existing profile." : "JSON parsed · Codex OAuth fields present"}</span><small>Fields: {authPreview.tokenFields.join(", ")}. Sign-in validity is checked after import.</small></div>}
             <p className="hint">
-              {authFileName
+              {authSource === "file" && authFileName
                 ? `Selected ${authFileName}.`
-                : "Choose the auth.json from the Codex account you want to add."} The credentials
+                : "Paste JSON or import the auth.json from the account you want to add."} The credentials
               are copied into a separate Switcher profile; the original file is left untouched. Use
               one profile for this login at a time so Codex's rotating refresh tokens don't conflict.
             </p>
@@ -3302,7 +3328,7 @@ function AddDialog({
           <button onClick={onClose} disabled={submitting}>
             Cancel
           </button>
-          <button className="primary" onClick={isApi ? submitApi : submit} disabled={submitting}>
+          <button className="primary" onClick={isApi ? submitApi : submit} disabled={submitting || (isImport && (parsingAuth || !authPreview || authPreview.alreadyAdded))}>
             {submitting && <Loader2 className="spin" size={14} />}
             {isApi
               ? "Create account"

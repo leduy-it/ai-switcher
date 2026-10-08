@@ -33,6 +33,8 @@ pub struct StoredState {
     pub overlay: OverlaySettings,
     #[serde(default)]
     pub auto_prime: crate::models::AutoPrimeSettings,
+    #[serde(default)]
+    pub desktop_sync: crate::models::DesktopSyncState,
     /// Claude organization uuid → who it is (email, app account names). Kept when an account is
     /// deleted so the Usage tab can still name usage of removed accounts.
     #[serde(default)]
@@ -55,6 +57,7 @@ impl Default for StoredState {
             api_gateway: ApiGatewayConfig::default(),
             overlay: OverlaySettings::default(),
             auto_prime: crate::models::AutoPrimeSettings::default(),
+            desktop_sync: crate::models::DesktopSyncState::default(),
             claude_orgs: BTreeMap::new(),
         }
     }

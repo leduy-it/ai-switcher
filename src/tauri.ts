@@ -713,11 +713,17 @@ export const api = {
   addAccount: (input: AddAccountInput) => invoke<AppSnapshot>("add_account", { input }),
   importCodexAccount: (input: ImportCodexAccountInput) =>
     invoke<AppSnapshot>("import_codex_account", { input }),
+  parseCodexAuth: (input: import("./types").CodexAuthSourceInput) => invoke<import("./types").CodexAuthPreview>("parse_codex_auth", { input }),
   addApiAccount: (input: AddApiAccountInput) => invoke<AppSnapshot>("add_api_account", { input }),
   fetchGatewayModels: (baseUrl: string, apiKey: string) =>
     invoke<string[]>("fetch_gateway_models", { baseUrl, apiKey }),
   renameAccount: (input: RenameAccountInput) => invoke<AppSnapshot>("rename_account", { input }),
   switchAccount: (input: SwitchAccountInput) => invoke<AppSnapshot>("switch_account", { input }),
+  setDesktopSync: (settings: import("./types").DesktopSyncSettings) => invoke<AppSnapshot>("set_desktop_sync", { settings }),
+  applyCodexDesktop: (desktopApp: import("./types").DesktopApp) => invoke<AppSnapshot>("apply_codex_desktop", { desktopApp }),
+  desktopSwitchAction: (action: "cancel" | "switchNow" | "retry" | "dismiss") => invoke<AppSnapshot>("desktop_switch_action", { action }),
+  openDesktopThread: (threadId: string) => invoke<void>("open_desktop_thread", { threadId }),
+  repairCodexSessions: () => invoke<import("./types").SessionMigrationReport>("repair_codex_sessions"),
   setLauncher: (input: SetLauncherInput) => invoke<AppSnapshot>("set_launcher", { input }),
   setAccountHidden: (input: SetAccountHiddenInput) =>
     invoke<AppSnapshot>("set_account_hidden", { input }),

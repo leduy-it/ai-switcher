@@ -9,6 +9,17 @@ This fork is maintained by [Michael Le](https://duyle.me). It is based on the or
 
 > ⚠️ Using multiple subscription accounts may violate a provider's terms of service. This app only manages logins locally on your machine — use at your own discretion.
 
+## Requirements and migration
+
+The repository maintains a [living requirements reference](docs/requirements.md) and an
+[indexed task status](TASKS.md). Relevant feature and behavior changes update these documents in
+the same change, following [the agent instructions](AGENTS.md).
+
+To assess or implement support in another app, use the
+[migration audit prompt](docs/prompts/migration-audit.md) and
+[migration implementation prompt](docs/prompts/migration-implementation.md). Both follow every
+requirement and baseline ID in the current specification.
+
 ## ⬇️ Download
 
 Get the latest **`.dmg`** from the [**Releases**](https://github.com/leduy-it/ai-switcher/releases/latest) page — download the `.dmg` under **Assets**, open it, and drag **Michael Le Profiles** to Applications.
@@ -31,11 +42,64 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/leduy-it/ai
 ### Claude Code & Codex (CLI)
 
 - Each account logs into its own isolated config dir and gets a **dedicated command** (`claude-<name>`, `codex-<name>`) so you can run several accounts in parallel across terminals.
-- Codex accounts can also be added from an existing OAuth `auth.json`; the app validates the OAuth tokens, copies them into a private per-account profile, and shows the email when the token exposes it. The selected source file is left untouched.
+- Codex accounts can also be added from an existing OAuth `auth.json`: choose **Paste JSON** and **Parse JSON**, or **Import file**. Parsing checks the local format and required token fields, then previews the email and duplicate status without creating an account or contacting the provider. Import revalidates the source, copies it into a private per-account profile and refreshes its live quota. The selected source file is left untouched; pasted JSON stays in the open dialog until import.
 - The bare `claude` / `codex` command **follows the account you select** (via a shell hook + an "active profile" file). Run `aisw` in an already-open terminal to sync it to the latest selection.
 - Chat sessions are **shared across accounts** in the same project, so you can resume work regardless of which account created it. Codex OAuth profiles keep their own `CODEX_HOME` and `auth.json`, while their launchers use the documented [`CODEX_SQLITE_HOME`](https://learn.chatgpt.com/docs/config-file/environment-variables) override to share the thread catalog with Codex Desktop. Session rollouts, archived rollouts, prompt history, and `session_index.jsonl` are linked to the default Codex home; existing index rows are merged before linking. API/proxy profiles remain isolated. A user-defined `sqlite_home` setting takes precedence over the environment variable and should point every profile at the same state directory.
 - The Codex shell hook also exports `CODEX_SQLITE_HOME` for subscription profiles, so legacy `CODEX_HOME` aliases inherit the shared session catalog. API/proxy launchers explicitly clear that override.
 - API/proxy accounts can point Claude Code or Codex at an external gateway, with one pinned model per generated launcher.
+
+### Desktop account switching and recovery
+
+Version 0.14.0 adds a separate **Codex desktop account** section in the Codex tab and the quota
+dropdown. Choose **Codex.app** or **ChatGPT.app**, then enable **Apply desktop when selecting an
+account**. Selecting an account refreshes its live quota immediately and queues a desktop handoff.
+**Apply desktop** also applies the current CLI selection. These two installed brands share a vendor
+identifier and desktop data folder; the chosen brand runs one at a time, preserving the existing UI
+data. The account's `auth.json` remains in its profile and is never copied into another credential
+store. The main `.codex` catalog and project/sidebar state are shared for local history.
+
+- **CLI selected** and **Desktop backend confirmed** are separate. A desktop launch is confirmed by
+  its execution profile plus the running local backend's `account/read` email/workspace identity.
+  An `auth.json` file alone does not prove desktop or cloud sign-in. Cloud conversations remain
+  subject to the selected account's access; Switcher never tries to resume inaccessible cloud work.
+- The default handoff waits for active turns to finish. It requests normal application quit and
+  starts the chosen desktop with explicit profile/catalog paths so shell initialization cannot
+  replace the chosen profile. A destination backend with an old catalog is repaired only when idle.
+  Desktop instances launched outside Switcher with an unknown execution profile wait until the
+  user finishes work and closes them; this prevents an uninformed restart of existing sessions.
+- **Switch now & recover** saves a durable private checkpoint before requesting interruption of
+  eligible local desktop turns. It stores the operation/app/host, thread and turn IDs, cwd/worktree,
+  old/new profile, model/execution policy, terminal metadata and last recorded session results.
+  Checkpoints live in the app data directory's `desktop-recovery/` with directory mode `0700` and
+  file mode `0600`. They contain private session history and should not be published.
+- After verifying the new identity, recovery uses `thread/resume` and `turn/start` in the original
+  thread. The continuation asks the agent to inspect files/processes, find the last finished step,
+  and complete the remaining work without repeating successful or uncertain external actions.
+  Persisted send intent, message IDs, turn acknowledgement and history markers prevent blind resend
+  after a connection loss. Completed, user-resumed/stopped, approval-blocked, ephemeral, remote or
+  unsupported client-tool sessions are left for the original client. RAM/PTY state is not restored.
+- The UI shows waiting, checkpointing, switching, restoring, acknowledged continuation and errors
+  per session, with cancel, original-session and safe retry actions. **Continued** means a new turn
+  was acknowledged; it does not mean that the resumed task completed successfully.
+- Credential changes from desktop or CLI trigger an account-specific quota/email refresh while
+  Switcher is running. Main, dropdown and overlay receive the same updated snapshot. A failed
+  Codex live read stays visible; shared session logs are never substituted as another account's quota.
+- **Recover missing local sessions** scans known OAuth profiles, including hidden originals, and
+  adds absent local thread catalog entries and complete absent paginated histories to the main home.
+  The handoff also runs this repair before reopening a desktop. SQLite creates consistent snapshots
+  including committed WAL data; backups live under the main home's `backups/session-catalog-migration-*`
+  with private permissions. Existing records/cursors are never replaced. Partial history conflicts,
+  unavailable rollout files, active source profiles and unknown schemas are reported. Creator/source,
+  model/policy, project/section metadata, attachments and tools are preserved for imported records.
+  Auth, enrollment and daemon tables are never imported. Keep these private backups off GitHub.
+  A trailing metadata event may leave an existing cursor behind without missing messages; repair
+  reports that separately and leaves the cursor for the native backend to replay. Socket symlinks
+  are resolved to avoid macOS's path-length limit on managed profile directories.
+
+The installed versions' local Unix-socket account/session reads were inspected without changing
+credentials or interrupting work. Builds confirm compilation; switching/recovery still depends on
+the native app/backend version exposing the required capabilities and on an accessible local session.
+API/proxy profiles continue to use their CLI launchers.
 
 ### Local API Gateway
 

@@ -512,6 +512,70 @@ pub struct AppSnapshot {
     pub tool_setups: std::collections::BTreeMap<String, ToolSetup>,
     #[serde(default)]
     pub api_gateway: ApiGatewaySnapshot,
+    pub desktop_sync: DesktopSyncState,
+    pub desktops: Vec<DesktopRuntime>,
+    pub selected_codex_home: Option<std::path::PathBuf>,
+    pub shared_codex_home: std::path::PathBuf,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DesktopApp {
+    Codex,
+    #[default]
+    Chatgpt,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopSyncSettings {
+    pub enabled: bool,
+    pub app: DesktopApp,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopSyncState {
+    pub settings: DesktopSyncSettings,
+    pub last_applied_account_id: Option<String>,
+    pub last_applied_at: Option<String>,
+    pub error: Option<String>,
+    pub confirmed_email: Option<String>,
+    pub confirmed_plan: Option<String>,
+    pub confirmed_at: Option<String>,
+    pub operation: Option<DesktopOperationView>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopOperationView {
+    pub id: String,
+    pub phase: String,
+    pub message: String,
+    pub target_account_id: String,
+    pub sessions: Vec<DesktopSessionView>,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopSessionView {
+    pub thread_id: String,
+    pub name: String,
+    pub cwd: String,
+    pub phase: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopRuntime {
+    pub app: DesktopApp,
+    pub installed: bool,
+    pub running: bool,
+    pub pid: Option<i32>,
+    pub profile_home: Option<std::path::PathBuf>,
+    pub session_home: Option<std::path::PathBuf>,
 }
 
 /// Saved geometry of the floating quota overlay window (screen coordinates, logical pixels).
@@ -813,12 +877,31 @@ pub struct AddAccountInput {
     pub launcher: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportCodexAccountInput {
     pub name: String,
     pub launcher: String,
-    pub auth_file_path: PathBuf,
+    #[serde(flatten)]
+    pub source: CodexAuthSourceInput,
+}
+
+// Intentionally no Debug: pasted JSON contains credential values.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAuthSourceInput {
+    #[serde(default)]
+    pub auth_file_path: Option<PathBuf>,
+    #[serde(default)]
+    pub auth_json: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAuthPreview {
+    pub email: Option<String>,
+    pub already_added: bool,
+    pub token_fields: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

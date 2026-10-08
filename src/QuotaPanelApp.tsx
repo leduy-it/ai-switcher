@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { ArrowUpRight, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Loader2, Maximize2, Pin, RefreshCw, Search, X } from "lucide-react";
 import michaelLogo from "./assets/logo-michael.svg";
 import { api } from "./tauri";
+import { DesktopStatus } from "./DesktopStatus";
 import type { Account, AppSnapshot, QuotaWindow, ToolId, ToolStatus } from "./types";
 import "./quota-panel.css";
 
@@ -70,6 +71,7 @@ export function QuotaPanelApp() {
       <div className="qpCaption"><span>{visible.length} accounts · quota used</span><button onClick={() => setExpanded(allExpanded ? new Set() : new Set(visible.map(({ key }) => key)))}>{allExpanded ? <ChevronsDownUp size={13} /> : <ChevronsUpDown size={13} />}{allExpanded ? "Collapse all" : "Expand all"}</button></div>
       {message && <p className="qpMessage" role="status">{message}</p>}
       <div className="qpScroll">
+        {snapshot && (filter === "all" || filter === "codex") && <DesktopStatus snapshot={snapshot} onUpdate={setSnapshot} compact />}
         <table className="qpTable">
           <thead><tr><th scope="col">Account / email</th><th scope="col">Plan</th><th scope="col">5-hour</th><th scope="col">Weekly</th></tr></thead>
           <tbody>

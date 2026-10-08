@@ -16,6 +16,12 @@ src-tauri/gen
 docs/*
 !docs/releases/
 !docs/releases/*.md
+# Maintained public requirements and migration prompts
+!docs/requirements.md
+!docs/prompts/
+docs/prompts/*
+!docs/prompts/migration-audit.md
+!docs/prompts/migration-implementation.md
 review.md
 
 # Local scratch / test debris (never publish)
