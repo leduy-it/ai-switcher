@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Shared Codex sessions across CLI profiles and Desktop.** OAuth profiles keep separate credentials
   while using the default Codex session catalog, including archived history and merged session indexes.
+- **One-click quota overlay.** A top-level sidebar control shows or hides the always-on-top quota panel;
+  the full account details remain available in the main window.
 - **Import Codex OAuth accounts from `auth.json`.** Imports create private per-account profiles and
   show the email when it is available in the token claims.
 - **Michael Le (duyle) Profiles theme.** A blue theme and matching profile logo can be selected in

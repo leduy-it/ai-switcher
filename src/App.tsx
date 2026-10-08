@@ -146,6 +146,8 @@ const emptySnapshot: AppSnapshot = {
 export function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
   const [profileTheme, setProfileTheme] = useState<ProfileTheme>(() => readProfileTheme());
+  const [overlayEnabled, setOverlayEnabled] = useState<boolean | null>(null);
+  const [overlayBusy, setOverlayBusy] = useState(false);
   // Every full-snapshot fetch takes a ticket, and only the newest ticket may write state. Without
   // this a background quota poll that started before a switch/delete could land afterwards and put
   // the pre-action snapshot back on screen.
@@ -207,6 +209,38 @@ export function App() {
       void emit("profile-theme-changed", profileTheme).catch(() => {});
     }
   }, [profileTheme]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getOverlaySettings()
+      .then((settings) => {
+        if (!cancelled) setOverlayEnabled(settings.enabled);
+      })
+      .catch(() => undefined);
+    const unlisten = listen<OverlaySettings>("overlay-settings-changed", (event) =>
+      setOverlayEnabled(event.payload.enabled),
+    );
+    return () => {
+      cancelled = true;
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  const toggleOverlay = async () => {
+    if (overlayBusy) return;
+    setOverlayBusy(true);
+    try {
+      const current = await api.getOverlaySettings();
+      const next = await api.setOverlayEnabled(!current.enabled);
+      setOverlayEnabled(next.enabled);
+      notify(next.enabled ? "Quota overlay is on top" : "Quota overlay hidden", "success");
+    } catch (err) {
+      notify(errorMessage(err), "error");
+    } finally {
+      setOverlayBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setBusy("load");
@@ -526,6 +560,25 @@ export function App() {
       <div className="workspace">
         <aside className="sidebar">
           <div className="sidebarNav">
+            <button
+              className={`toolTab ${overlayEnabled ? "selected" : ""}`}
+              onClick={() => void toggleOverlay()}
+              disabled={overlayBusy || overlayEnabled === null}
+              title="Show or hide the always-on-top quota panel"
+            >
+              <span className="usageTabLabel">
+                <Layers />
+                Quota overlay
+              </span>
+              <small>
+                {overlayEnabled === null
+                  ? "Loading status…"
+                  : overlayEnabled
+                    ? "Always on top · click to hide"
+                    : "Click to show quota"}
+              </small>
+            </button>
+            <div className="sideDivider" />
             {snapshot.tools.map((tool) => (
               <button
                 className={`toolTab ${view === "accounts" && tool.id === selectedTool ? "selected" : ""}`}

@@ -15,7 +15,7 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/hoangpm96/a
 ## Features
 
 - **One window for every tool.** Log in, switch, rename, and remove accounts per tool.
-- **Menu-bar quick switch.** A tray icon in the macOS menu bar lists your Claude & Codex accounts (with quota % and plan) so you can switch without opening the window. Closing the window hides the app to the tray; it keeps polling quota in the background.
+- **Menu-bar quick switch.** A tray icon in the macOS menu bar lists your Claude & Codex accounts (with quota % and plan) so you can switch without opening the window. The main sidebar also has a one-click quota overlay toggle. Closing the window hides the app to the tray; it keeps polling quota in the background.
 - **Quota at a glance.** Reads 5-hour / weekly usage for Claude & Codex and per-model quota for Antigravity, shows your **subscription plan** (Plus / Pro / Max) when the API reports it, and exposes Codex usage-limit reset credits in a per-account modal.
 - **Appearance profiles.** Keep the original visual theme or choose the blue **Michael Le (duyle) Profiles** theme, with a matching logo and the original author credit.
 - **Per-tool auto-switch.** Configure separately for Claude and Codex — the bare command falls back to another account when the active one nears its quota.
