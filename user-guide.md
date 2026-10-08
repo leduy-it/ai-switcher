@@ -1,6 +1,6 @@
-# AI Account Switcher — User Guide
+# Michael Le Profiles — User Guide
 
-This guide explains how to use **AI Account Switcher** to keep several logins for
+This guide explains how to use **Michael Le Profiles** to keep several logins for
 **Claude Code**, **Codex**, and **Antigravity IDE** on one Mac and switch between
 them — including how parallel terminals, chat resume, and quota tracking behave.
 
@@ -56,7 +56,7 @@ block to `~/.zshrc` (and `~/.bashrc` if it exists), bracketed by:
 aisw() {
   if [ -r ~/.config/ai-account-switcher/active/claude.profile ]; then export CLAUDE_CONFIG_DIR="$(cat ...)"; else unset CLAUDE_CONFIG_DIR; fi
   if [ -r ~/.config/ai-account-switcher/active/codex.profile  ]; then export CODEX_HOME="$(cat ...)";       else unset CODEX_HOME;       fi
-  [ -n "$1" ] && echo "AI Account Switcher: synced the account for this terminal."
+  [ -n "$1" ] && echo "Michael Le Profiles: synced the account for this terminal."
 }
 aisw >/dev/null 2>&1
 # <<< ai-account-switcher <<<

@@ -1,23 +1,26 @@
-# AI Account Switcher
+# Michael Le Profiles
 
-A native macOS app to manage and switch between **multiple accounts** for AI coding tools — **Claude Code**, **Codex**, and **Antigravity IDE** — from one place.
+A native macOS app by **Michael Le (duyle)** to manage and switch between **multiple accounts** for AI coding tools — **Claude Code**, **Codex**, and **Antigravity IDE** — from one place.
 
 Built with [Tauri](https://tauri.app) (Rust + React).
+
+This fork is maintained by [Michael Le](https://duyle.me). It is based on the original project by
+[Hoàng Phan](https://github.com/hoangpm96/ai-switcher); thank you for the original work.
 
 > ⚠️ Using multiple subscription accounts may violate a provider's terms of service. This app only manages logins locally on your machine — use at your own discretion.
 
 ## ⬇️ Download
 
-Get the latest **`.dmg`** from the [**Releases**](https://github.com/hoangpm96/ai-switcher/releases/latest) page — download the `.dmg` under **Assets**, open it, and drag **AI Account Switcher** to Applications.
+Get the latest **`.dmg`** from the [**Releases**](https://github.com/leduy-it/ai-switcher/releases/latest) page — download the `.dmg` under **Assets**, open it, and drag **Michael Le Profiles** to Applications.
 
-> First launch only: the app is unsigned, so right-click it → **Open** (or run `xattr -cr "/Applications/AI Account Switcher.app"`). See [Install](#install) below.
+> First launch only: the app is unsigned, so right-click it → **Open** (or run `xattr -cr "/Applications/Michael Le Profiles.app"`). See [Install](#install) below.
 
 ## Features
 
 - **One window for every tool.** Log in, switch, rename, and remove accounts per tool.
 - **Menu-bar quick switch.** A tray icon in the macOS menu bar lists your Claude & Codex accounts (with quota % and plan) so you can switch without opening the window. The main sidebar also has a one-click quota overlay toggle. Closing the window hides the app to the tray; it keeps polling quota in the background.
 - **Quota at a glance.** Reads 5-hour / weekly usage for Claude & Codex and per-model quota for Antigravity, shows your **subscription plan** (Plus / Pro / Max) when the API reports it, and exposes Codex usage-limit reset credits in a per-account modal.
-- **Appearance profiles.** Keep the original visual theme or choose the blue **Michael Le (duyle) Profiles** theme, with a matching logo and the original author credit.
+- **Blue Liquid Glass identity.** A Michael Le Profiles logo, native macOS Liquid Glass window on macOS 26+, and a direct link to [duyle.me](https://duyle.me).
 - **Per-tool auto-switch.** Configure separately for Claude and Codex — the bare command falls back to another account when the active one nears its quota.
 - **Usage & cost tab.** Token usage and estimated cost per tool, plus an aggregated **All** view across tools, charted over a selectable date range.
 - **Local API gateway.** Expose Claude/Codex subscription accounts through a local OpenAI/Anthropic-compatible server with API keys, model combos, fallback rotation, cooldown handling, and gateway usage tracking.
@@ -63,8 +66,8 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/hoangpm96/a
 
 ## Install
 
-1. Download the latest `.dmg` from the [Releases](https://github.com/hoangpm96/ai-switcher/releases/latest) page.
-2. Open the `.dmg` and drag **AI Account Switcher** to Applications.
+1. Download the latest `.dmg` from the [Releases](https://github.com/leduy-it/ai-switcher/releases/latest) page.
+2. Open the `.dmg` and drag **Michael Le Profiles** to Applications.
 
 The app is **not code-signed** (no paid Apple Developer account), so macOS Gatekeeper will warn on first launch. To open it:
 
@@ -72,7 +75,7 @@ The app is **not code-signed** (no paid Apple Developer account), so macOS Gatek
 - Run once in Terminal:
 
   ```bash
-  xattr -cr "/Applications/AI Account Switcher.app"
+  xattr -cr "/Applications/Michael Le Profiles.app"
   ```
 
 You only need to do this the first time.
@@ -102,3 +105,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the per-version history and
 ## License
 
 No license file yet — add one (e.g. MIT) before sharing widely if you want to allow reuse.
+
+## Attribution
+
+Michael Le maintains this fork and its visual identity. The underlying project was created by
+[Hoàng Phan](https://github.com/hoangpm96/ai-switcher), whose work is gratefully acknowledged.
+
+## Upgrade compatibility
+
+The app retains its existing local profile-data and macOS Keychain service identifiers so saved
+accounts and credentials remain available after the rebrand. Those identifiers are internal
+compatibility details; the app is presented and maintained as Michael Le Profiles.

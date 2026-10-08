@@ -1439,7 +1439,7 @@ fn discover_codex_models(config_dir: &FsPath, binary: Option<&FsPath>) -> Result
                 "params": {
                     "clientInfo": {
                         "name": "ai-switcher",
-                        "title": "AI Account Switcher",
+                        "title": "Michael Le Profiles",
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "capabilities": {}

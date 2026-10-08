@@ -924,7 +924,7 @@ pub fn opencode_profile_key(profile: &Path) -> Option<String> {
 fn run_cursor_profile_login(command: &Path, profile: &Path) -> Result<()> {
     fs::create_dir_all(profile.join(".cursor"))?;
     let script = format!(
-        "echo '=== Sign in to Cursor CLI: follow the prompts, approve in your browser ==='; export HOME={dir}; export AGENT_CLI_CREDENTIAL_STORE=file; {cmd} login; echo; echo 'Done — return to AI Account Switcher (it will detect it); you can close this window.'",
+        "echo '=== Sign in to Cursor CLI: follow the prompts, approve in your browser ==='; export HOME={dir}; export AGENT_CLI_CREDENTIAL_STORE=file; {cmd} login; echo; echo 'Done — return to Michael Le Profiles (it will detect it); you can close this window.'",
         dir = shell_quote(&profile.to_string_lossy()),
         cmd = shell_quote(&command.to_string_lossy()),
     );
@@ -1078,7 +1078,7 @@ pub fn write_codex_proxy_config(
 ) -> Result<()> {
     fs::create_dir_all(profile)?;
     let mut toml = String::new();
-    toml.push_str("# Managed by AI Account Switcher — API/proxy account.\n");
+    toml.push_str("# Managed by Michael Le Profiles — API/proxy account.\n");
     toml.push_str(&format!("model = {}\n", toml_basic_string(model)));
     toml.push_str("model_provider = \"proxy\"\n\n");
     toml.push_str("[model_providers.proxy]\n");
@@ -1275,7 +1275,7 @@ fn shell_hook_block(store: &Store) -> String {
         \x20   unset CODEX_HOME\n\
         \x20   export CODEX_SQLITE_HOME={sqlite_home}\n\
         \x20 fi\n\
-        \x20 [ -n \"$1\" ] && echo \"AI Account Switcher: synced the account for this terminal.\"\n\
+        \x20 [ -n \"$1\" ] && echo \"Michael Le Profiles: synced the account for this terminal.\"\n\
          }}\n\
          aisw >/dev/null 2>&1\n\
          {cursor_fn}\
@@ -1390,7 +1390,7 @@ fn run_login_command(binary: &str, args: &[&str]) -> Result<()> {
         script.push(' ');
         script.push_str(&shell_quote(arg));
     }
-    script.push_str("; echo; echo 'After signing in, return to AI Account Switcher.'");
+    script.push_str("; echo; echo 'After signing in, return to Michael Le Profiles.'");
 
     open_terminal_script(&script)
 }
@@ -1496,7 +1496,7 @@ fn run_profile_login_command(
         .collect::<Vec<_>>()
         .join(" ");
     let script = format!(
-        "echo '=== Sign in to {tool}: follow the prompts, approve in your browser ==='; export {env}={dir}; {cmd} {args}; echo; echo 'Done — return to AI Account Switcher (it will detect it); you can close this window.'",
+        "echo '=== Sign in to {tool}: follow the prompts, approve in your browser ==='; export {env}={dir}; {cmd} {args}; echo; echo 'Done — return to Michael Le Profiles (it will detect it); you can close this window.'",
         tool = tool_id.display_name(),
         env = env_name,
         dir = shell_quote(&profile.to_string_lossy()),

@@ -552,6 +552,22 @@ pub fn run() {
             create_virtual_api_account
         ])
         .setup(|app| {
+            // Use the system Liquid Glass material on macOS 26+, with the native HUD material
+            // as a graceful fallback on older macOS releases. The web content is transparent
+            // so the system material remains visible behind the blue interface.
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                let effects = tauri::window::EffectsBuilder::new()
+                    .effects([
+                        tauri::window::Effect::LiquidGlassRegular,
+                        tauri::window::Effect::HudWindow,
+                    ])
+                    .radius(24.0)
+                    .interactive(true)
+                    .build();
+                let _ = window.set_effects(effects);
+            }
+
             // Menu-bar (tray) icon for quick account switching without opening the window.
             tray::create(app.handle())?;
 

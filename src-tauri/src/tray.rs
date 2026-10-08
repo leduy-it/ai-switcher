@@ -41,7 +41,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         // Monochrome template — macOS recolours it per theme (white in dark menu bar) and
         // brightens it when the menu is open, matching the system icons (wifi/clock).
         .icon_as_template(true)
-        .tooltip("AI Account Switcher")
+        .tooltip("Michael Le Profiles")
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(handle_menu_event)
@@ -105,7 +105,7 @@ fn build_menu(app: &AppHandle, snapshot: Option<&AppSnapshot>) -> tauri::Result<
     menu.append(&MenuItem::with_id(
         app,
         OPEN_ID,
-        "Open AI Switcher…",
+        "Open Michael Le Profiles…",
         true,
         None::<&str>,
     )?)?;

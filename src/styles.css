@@ -1,86 +1,47 @@
 /* ============================================================
-   AI Account Switcher — native macOS look, auto light/dark
+   Michael Le Profiles — native macOS Liquid Glass surfaces
    ============================================================ */
 
 :root {
-  /* Surfaces — warm dark (ai4ba style) */
-  --bg-window: #100e0c;
-  --bg-sidebar: rgba(255, 255, 255, 0.015);
-  --surface: #1a1512;
-  --surface-2: #221c17;
-  --surface-hover: #2c241d;
-
-  /* Text — cream / warm */
-  --text: #f4efe8;
-  --text-2: #b7ac9d;
-  --text-3: #8a8073;
-
-  /* Lines — hairline borders kept faint; depth comes from the top edge-light + shadow. */
-  --line: rgba(255, 255, 255, 0.07);
-  --line-strong: rgba(255, 255, 255, 0.12);
-  /* Top edge-light: a 1px inset highlight that makes a dark surface read as raised. */
-  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --edge-strong: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-
-  /* Accent + status */
-  --accent: #fb6a1a;
-  --accent-press: #e85c0c;
-  --accent-bright: #fb8a2a;
-  --accent-rgb: 251, 106, 26;
-  --accent-soft: rgba(251, 106, 26, 0.16);
-  --accent-grad: linear-gradient(135deg, #fb8a2a 0%, #e85c0c 100%);
-  --accent-grad-hover: linear-gradient(135deg, #fc9a3f 0%, #f0570c 100%);
+  --bg-window: transparent;
+  --bg-sidebar: rgba(14, 31, 53, 0.34);
+  --surface: rgba(13, 29, 50, 0.50);
+  --surface-2: rgba(21, 41, 66, 0.58);
+  --surface-hover: rgba(54, 91, 135, 0.42);
+  --text: #eff7ff;
+  --text-2: #b9cde3;
+  --text-3: #8ba4bf;
+  --line: rgba(216, 235, 255, 0.13);
+  --line-strong: rgba(216, 235, 255, 0.22);
+  --edge: inset 0 1px 0 rgba(255, 255, 255, 0.17);
+  --edge-strong: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  --accent: #73b8ff;
+  --accent-press: #438fe7;
+  --accent-bright: #b5dcff;
+  --accent-rgb: 100, 174, 255;
+  --accent-soft: rgba(92, 164, 246, 0.20);
+  --accent-grad: linear-gradient(135deg, #8bc8ff 0%, #438fe7 100%);
+  --accent-grad-hover: linear-gradient(135deg, #b0dcff 0%, #5da4f4 100%);
   --green: #34d399;
   --amber: #fcd34d;
   --red: #fb7185;
   --green-soft: rgba(52, 211, 153, 0.16);
   --amber-soft: rgba(252, 211, 77, 0.16);
   --red-soft: rgba(251, 113, 133, 0.16);
-
-  /* Elevation */
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.3);
-  --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.62), 0 4px 14px rgba(0, 0, 0, 0.45);
-
-  --radius: 13px;
-  --radius-sm: 9px;
+  --shadow-card: 0 8px 26px rgba(0, 7, 18, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  --shadow-pop: 0 24px 64px rgba(0, 7, 18, 0.42), 0 4px 14px rgba(0, 7, 18, 0.18);
+  --radius: 18px;
+  --radius-sm: 12px;
 
   color: var(--text);
-  /* Warm radial glow from the top, over the deep base. */
   background:
-    radial-gradient(1100px 620px at 50% -14%, rgba(var(--accent-rgb), 0.1), transparent 62%),
-    var(--bg-window);
+    radial-gradient(900px 540px at 48% -22%, rgba(105, 177, 255, 0.13), transparent 70%),
+    transparent;
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-}
-
-:root[data-profile-theme="michael-blue"] {
-  --bg-window: #0a1220;
-  --bg-sidebar: rgba(99, 160, 238, 0.035);
-  --surface: #111c2d;
-  --surface-2: #17243a;
-  --surface-hover: #20334f;
-  --text: #edf5ff;
-  --text-2: #b2c5dc;
-  --text-3: #8196b1;
-  --line: rgba(170, 202, 240, 0.1);
-  --line-strong: rgba(170, 202, 240, 0.18);
-  --edge: inset 0 1px 0 rgba(210, 231, 255, 0.06);
-  --edge-strong: inset 0 1px 0 rgba(210, 231, 255, 0.1);
-  --accent: #63aaff;
-  --accent-press: #3e8cf0;
-  --accent-bright: #a4d0ff;
-  --accent-rgb: 86, 158, 244;
-  --accent-soft: rgba(var(--accent-rgb), 0.18);
-  --accent-grad: linear-gradient(135deg, #64b0ff 0%, #347fe0 100%);
-  --accent-grad-hover: linear-gradient(135deg, #83c1ff 0%, #4a94f0 100%);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.32);
-  --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.66), 0 4px 14px rgba(0, 0, 0, 0.48);
-  background:
-    radial-gradient(1100px 620px at 50% -14%, rgba(var(--accent-rgb), 0.15), transparent 62%),
-    var(--bg-window);
 }
 
 * {
@@ -90,6 +51,12 @@
 body {
   margin: 0;
   min-height: 100vh;
+  background: transparent;
+}
+
+#root {
+  min-height: 100vh;
+  background: transparent;
 }
 
 button,
@@ -400,28 +367,6 @@ button.danger:hover:not(:disabled) {
 .footMeta small {
   font-size: 11px;
   color: var(--text-3);
-}
-
-.footBy {
-  align-self: flex-start;
-  margin-top: 3px;
-  max-width: 100%;
-  overflow: hidden;
-  padding: 0;
-  min-height: 0;
-  background: none;
-  border: none;
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.footBy:hover:not(:disabled) {
-  background: none;
-  text-decoration: underline;
 }
 
 .toolTab {
@@ -1622,31 +1567,6 @@ div.quotaError .linkBtn {
 .settingsSectionHead small {
   color: var(--text-2);
   font-size: 12px;
-}
-
-.themeOptions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.themeOption {
-  flex: 1 1 220px;
-  justify-content: flex-start;
-  min-height: 38px;
-  text-align: left;
-}
-
-.themeOption.selected {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.themeCredit {
-  color: var(--text-3);
-  font-size: 11.5px;
-  line-height: 1.4;
 }
 
 .cliSetup.needsSetup {
@@ -3452,4 +3372,481 @@ div.quotaError .linkBtn {
 
 .warnText {
   color: var(--amber);
+}
+
+/* ---------- Michael Le Liquid Glass polish ---------- */
+
+html,
+body,
+#root {
+  background-color: transparent;
+}
+
+.shell {
+  isolation: isolate;
+  padding: 0 20px 20px;
+}
+
+.workspace {
+  gap: 14px;
+}
+
+.sidebar,
+.panel,
+.account,
+.apiSection,
+.usageTool,
+.settingsSection,
+.statTile,
+.projectCard,
+.usageAccountRow,
+.modal,
+.toast,
+.comboPicker,
+.candidateList {
+  -webkit-backdrop-filter: blur(24px) saturate(155%);
+  backdrop-filter: blur(24px) saturate(155%);
+}
+
+.sidebar {
+  align-self: stretch;
+  background: rgba(10, 25, 44, 0.34);
+  border: 1px solid rgba(208, 231, 255, 0.13);
+  border-radius: 20px;
+  box-shadow: var(--edge), 0 16px 40px rgba(0, 8, 22, 0.16);
+  padding: 10px;
+}
+
+.sidebarFoot {
+  border-color: rgba(208, 231, 255, 0.12);
+  padding: 12px 6px 3px;
+}
+
+.footLogo {
+  border-radius: 9px;
+  box-shadow: 0 3px 10px rgba(3, 11, 23, 0.28);
+  height: 32px;
+  width: 32px;
+}
+
+.footMeta strong {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.footWebsite,
+.brandLink {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--accent-bright);
+  display: inline-flex;
+  font-size: 11.5px;
+  font-weight: 600;
+  gap: 3px;
+  justify-content: flex-start;
+  min-height: 20px;
+  padding: 0;
+  width: fit-content;
+}
+
+.footWebsite svg,
+.brandLink svg {
+  height: 12px;
+  width: 12px;
+}
+
+.footWebsite:hover:not(:disabled),
+.brandLink:hover:not(:disabled) {
+  background: transparent;
+  color: #fff;
+  text-decoration: underline;
+}
+
+.toolTab {
+  border-radius: 13px;
+  min-height: 52px;
+}
+
+.toolTab.selected {
+  box-shadow: 0 7px 20px rgba(49, 126, 220, 0.24), var(--edge);
+}
+
+.panel {
+  background: rgba(10, 25, 44, 0.42);
+  border: 1px solid rgba(211, 232, 255, 0.15);
+  border-radius: 22px;
+  box-shadow: var(--edge-strong), 0 18px 48px rgba(0, 8, 22, 0.18);
+  padding: 22px;
+}
+
+.panelHead {
+  gap: 12px;
+}
+
+.titleRow h2 {
+  letter-spacing: -0.025em;
+}
+
+.account,
+.apiSection,
+.usageTool,
+.settingsSection,
+.statTile,
+.projectCard,
+.usageAccountRow {
+  background: rgba(17, 37, 61, 0.48);
+  border-color: rgba(211, 232, 255, 0.13);
+  border-radius: 16px;
+  box-shadow: var(--edge), 0 10px 26px rgba(0, 8, 22, 0.14);
+}
+
+.account:hover,
+.projectCard:hover,
+.usageAccountRow:hover {
+  border-color: rgba(190, 222, 255, 0.25);
+}
+
+.account.active {
+  border-color: rgba(122, 190, 255, 0.62);
+  box-shadow: 0 0 0 1px rgba(122, 190, 255, 0.48), var(--edge-strong),
+    0 14px 34px rgba(20, 86, 160, 0.2);
+}
+
+button {
+  -webkit-backdrop-filter: blur(12px) saturate(145%);
+  backdrop-filter: blur(12px) saturate(145%);
+}
+
+button.primary,
+button.accent,
+.toolTab.selected {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+input,
+select,
+textarea {
+  color-scheme: dark;
+}
+
+.bar {
+  background: linear-gradient(180deg, rgba(2, 11, 23, 0.38), rgba(178, 216, 255, 0.08));
+  border: 1px solid rgba(210, 232, 255, 0.10);
+  box-shadow: inset 0 1px 3px rgba(0, 6, 18, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  height: 9px;
+}
+
+.bar span {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.60), transparent 48%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 0 12px currentColor;
+}
+
+.bar[data-level="low"] span {
+  background-color: var(--green);
+  color: rgba(52, 211, 153, 0.42);
+}
+
+.bar[data-level="mid"] span {
+  background-color: var(--amber);
+  color: rgba(252, 211, 77, 0.38);
+}
+
+.bar[data-level="high"] span {
+  background-color: var(--red);
+  color: rgba(251, 113, 133, 0.38);
+}
+
+.bar[data-level="unknown"] span {
+  background-color: var(--text-3);
+  color: rgba(139, 164, 191, 0.28);
+}
+
+.usageChartSvg {
+  height: 66px;
+}
+
+.usageBar {
+  filter: drop-shadow(0 0 4px rgba(var(--accent-rgb), 0.32));
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+
+.usageBar:hover,
+.usageBar.active {
+  filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.55));
+}
+
+.usageRange,
+.usageTabs,
+.usageViewSwitch {
+  background: rgba(8, 21, 38, 0.40);
+  border-color: rgba(210, 232, 255, 0.13);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+}
+
+.usageRange button.selected,
+.usageTabs button.selected,
+.usageViewSwitch button.selected {
+  background: rgba(115, 184, 255, 0.18);
+  border-color: rgba(174, 215, 255, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13), 0 3px 10px rgba(0, 8, 22, 0.14);
+  color: #f7fbff;
+}
+
+.usageTable {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.usageTable table {
+  min-width: 440px;
+}
+
+.sessionTable table {
+  min-width: 740px;
+}
+
+.usageTable th {
+  background: rgba(8, 21, 38, 0.40);
+  position: sticky;
+  top: 0;
+}
+
+.modal {
+  background: rgba(12, 28, 48, 0.78);
+  border-color: rgba(217, 236, 255, 0.24);
+  border-radius: 20px;
+}
+
+.modalBackdrop {
+  background: rgba(2, 8, 16, 0.22);
+  -webkit-backdrop-filter: blur(8px) saturate(125%);
+  backdrop-filter: blur(8px) saturate(125%);
+}
+
+.toast {
+  background: rgba(12, 28, 48, 0.82);
+  border-color: rgba(217, 236, 255, 0.20);
+}
+
+.empty {
+  background: rgba(15, 33, 56, 0.3);
+  border-color: rgba(217, 236, 255, 0.2);
+}
+
+.accountGrid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+}
+
+.apiGrid,
+.candidateGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settingsList {
+  gap: 12px;
+}
+
+.settingsSection {
+  gap: 12px;
+  padding: 15px;
+}
+
+.projectGrid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+}
+
+@media (max-width: 900px) {
+  .shell {
+    padding: 0 14px 14px;
+  }
+
+  .workspace {
+    gap: 10px;
+    grid-template-columns: 184px minmax(0, 1fr);
+  }
+
+  .panel {
+    padding: 18px;
+  }
+}
+
+@media (max-width: 760px) {
+  .shell {
+    padding: 0 12px 12px;
+  }
+
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 6px;
+  }
+
+  .sidebarNav {
+    display: flex;
+    flex: none;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .sidebarNav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sideDivider {
+    display: none;
+  }
+
+  .toolTab {
+    align-items: center;
+    flex: 1 0 max-content;
+    flex-direction: row;
+    justify-content: center;
+    min-height: 40px;
+    padding: 7px 10px;
+  }
+
+  .toolTab span {
+    font-size: 12px;
+  }
+
+  .toolTab small,
+  .sidebarFoot {
+    display: none;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 680px) {
+  .shell {
+    padding: 0 8px 8px;
+  }
+
+  .topbar {
+    margin-left: -8px;
+    margin-right: -8px;
+  }
+
+  .panel {
+    border-radius: 16px;
+    padding: 13px;
+  }
+
+  .panelHead {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .panelHead .actions {
+    flex-wrap: wrap;
+  }
+
+  .actions > button,
+  .usageRange {
+    flex: 1 1 auto;
+  }
+
+  .usageRange button {
+    flex: 1;
+    padding: 0 7px;
+  }
+
+  .accountGrid,
+  .apiGrid,
+  .candidateGrid,
+  .projectGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .apiFormRow,
+  .apiFormRow.cols3,
+  .memberRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .memberRow input[type="checkbox"] {
+    justify-self: start;
+  }
+
+  .usageStats {
+    grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+    gap: 7px;
+  }
+
+  .statTile {
+    padding: 9px;
+  }
+
+  .usageAccountsHead,
+  .projectUsageHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .usageAccountToolbar {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .usageViewSwitch {
+    display: flex;
+    width: 100%;
+  }
+
+  .usageViewSwitch button {
+    flex: 1;
+    justify-content: center;
+    min-width: 0;
+    padding: 0 6px;
+  }
+
+  .usageTabs {
+    width: 100%;
+  }
+
+  .usageTabs button {
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .apiRotation {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .sidebar,
+  .panel,
+  .account,
+  .apiSection,
+  .usageTool,
+  .settingsSection,
+  .statTile,
+  .projectCard,
+  .usageAccountRow,
+  .modal,
+  .toast,
+  button {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .sidebar {
+    background: rgba(10, 25, 44, 0.94);
+  }
+
+  .panel {
+    background: rgba(10, 25, 44, 0.96);
+  }
 }

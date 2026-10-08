@@ -799,7 +799,7 @@ function ModelTable({ models }: { models: ModelUsage[] }) {
 function SessionTable({ sessions }: { sessions: SessionUsage[] }) {
   if (sessions.length === 0) return null;
   return (
-    <div className="usageTable">
+    <div className="usageTable sessionTable">
       <div className="usageTableHead">Recent sessions</div>
       <table>
         <thead>

@@ -363,7 +363,7 @@ fn binary_candidate(tool_id: &ToolId, path: PathBuf, source: DetectionSource) ->
     let mut warnings = Vec::new();
     if is_app_launcher {
         warnings
-            .push("This is an AI Account Switcher launcher, not the real CLI binary".to_string());
+            .push("This is a Michael Le Profiles launcher, not the real CLI binary".to_string());
     }
     if in_profile {
         warnings.push("Binary path appears to be inside an account profile".to_string());

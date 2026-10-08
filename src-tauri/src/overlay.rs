@@ -55,6 +55,21 @@ pub fn show(app: &AppHandle) -> tauri::Result<()> {
         .accept_first_mouse(true)
         .build()?;
 
+    // Match the main app's native material while keeping the quota panel light enough to read
+    // through at its configured idle opacity.
+    #[cfg(target_os = "macos")]
+    {
+        let effects = tauri::window::EffectsBuilder::new()
+            .effects([
+                tauri::window::Effect::LiquidGlassClear,
+                tauri::window::Effect::HudWindow,
+            ])
+            .radius(16.0)
+            .interactive(true)
+            .build();
+        let _ = window.set_effects(effects);
+    }
+
     // Keep it visible when the user switches Spaces / enters another full-screen app.
     let _ = window.set_visible_on_all_workspaces(true);
     let _ = window.set_ignore_cursor_events(settings.click_through);
