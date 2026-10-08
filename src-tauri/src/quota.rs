@@ -1543,14 +1543,58 @@ pub(crate) fn codex_account_email_from_auth(value: &serde_json::Value) -> Option
         .find_map(jwt_email)
 }
 
+/// Codex session metadata records the creator user id; pair it with the email from that profile's
+/// JWT so Usage can label a session without exposing any token material.
+pub(crate) fn codex_user_identity(config_dir: &Path) -> Option<(String, String)> {
+    let raw = std::fs::read_to_string(config_dir.join("auth.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    codex_user_identity_from_auth(&value)
+}
+
+pub(crate) fn codex_user_id(config_dir: &Path) -> Option<String> {
+    let raw = std::fs::read_to_string(config_dir.join("auth.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    codex_user_id_from_auth(&value)
+}
+
+pub(crate) fn codex_user_id_from_auth(value: &serde_json::Value) -> Option<String> {
+    let tokens = value.get("tokens")?;
+    ["id_token", "access_token"]
+        .into_iter()
+        .filter_map(|key| tokens.get(key).and_then(serde_json::Value::as_str))
+        .find_map(|token| {
+            let claims = jwt_claims(token)?;
+            claims
+                .get("https://api.openai.com/auth")
+                .and_then(|auth| auth.get("chatgpt_user_id").or_else(|| auth.get("user_id")))
+                .or_else(|| claims.get("user_id"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .map(ToString::to_string)
+        })
+}
+
+pub(crate) fn codex_user_identity_from_auth(value: &serde_json::Value) -> Option<(String, String)> {
+    let user_id = codex_user_id_from_auth(value)?;
+    let email = codex_account_email_from_auth(value)?;
+    Some((user_id, email))
+}
+
 fn jwt_email(token: &str) -> Option<String> {
+    jwt_email_from_claims(&jwt_claims(token)?)
+}
+
+fn jwt_claims(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?;
     let bytes = base64::Engine::decode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
         payload,
     )
     .ok()?;
-    let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn jwt_email_from_claims(claims: &serde_json::Value) -> Option<String> {
     let candidates = [
         claims.get("email"),
         claims

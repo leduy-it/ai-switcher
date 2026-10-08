@@ -1760,6 +1760,7 @@ impl ManagedState {
             }
         }
         let account_id = crate::quota::codex_account_id_from_auth(&auth);
+        let user_id = crate::quota::codex_user_id_from_auth(&auth);
         let email = crate::quota::codex_account_email_from_auth(&auth);
 
         validate_name(&ToolId::Codex, None, &input.name, self)?;
@@ -1779,6 +1780,7 @@ impl ManagedState {
                 &data,
                 &default_dir,
                 account_id.as_deref(),
+                user_id.as_deref(),
                 email.as_deref(),
             ) {
                 anyhow::bail!("This Codex account is already added");
@@ -1832,6 +1834,7 @@ impl ManagedState {
                 &data,
                 &default_dir,
                 account_id.as_deref(),
+                user_id.as_deref(),
                 account.account_email.as_deref(),
             ) {
                 Err(anyhow::anyhow!("This Codex account is already added"))
@@ -2825,6 +2828,7 @@ fn codex_identity_exists(
     data: &StoredState,
     default_config_dir: &std::path::Path,
     account_id: Option<&str>,
+    user_id: Option<&str>,
     email: Option<&str>,
 ) -> bool {
     data.accounts
@@ -2832,12 +2836,33 @@ fn codex_identity_exists(
         .filter(|account| account.tool_id == ToolId::Codex && account.api_provider.is_none())
         .any(|account| {
             let config_dir = account_config_dir_with_default(store, account, default_config_dir);
-            account_id.is_some_and(|candidate| {
-                crate::quota::codex_account_id(&config_dir).as_deref() == Some(candidate)
-            }) || email.is_some_and(|candidate| {
-                crate::quota::codex_account_email(&config_dir)
-                    .is_some_and(|current| current.eq_ignore_ascii_case(candidate))
-            })
+            let current_email = crate::quota::codex_account_email(&config_dir);
+            let current_user_id = crate::quota::codex_user_id(&config_dir);
+            if let (Some(candidate), Some(current)) = (email, current_email.as_deref()) {
+                if current.eq_ignore_ascii_case(candidate) {
+                    return true;
+                }
+                // A workspace/account id can cover several distinct user logins. Compare the
+                // per-user id when both emails are known and different; never dedupe on workspace
+                // id alone in that case.
+                return user_id.is_some_and(|candidate| {
+                    current_user_id.as_deref() == Some(candidate)
+                });
+            }
+            if user_id.is_some_and(|candidate| {
+                current_user_id.as_deref() == Some(candidate)
+            }) {
+                return true;
+            }
+            // Only fall back to the shared workspace id when neither profile exposed a user id
+            // or email. Otherwise different people in the same workspace look like duplicates.
+            user_id.is_none()
+                && current_user_id.is_none()
+                && email.is_none()
+                && current_email.is_none()
+                && account_id.is_some_and(|candidate| {
+                    crate::quota::codex_account_id(&config_dir).as_deref() == Some(candidate)
+                })
         })
 }
 

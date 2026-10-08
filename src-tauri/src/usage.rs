@@ -31,7 +31,7 @@ const MAX_SESSIONS: usize = 30;
 /// Bump when the cache format or scan logic changes in a way that invalidates old aggregates
 /// (e.g. the symlink-dedup fix, org attribution) so a stale cache is discarded instead of
 /// double-counting.
-const CACHE_VERSION: u32 = 8;
+const CACHE_VERSION: u32 = 9;
 
 // ---------------------------------------------------------------------------
 // On-disk incremental cache
@@ -78,6 +78,9 @@ struct FileCursor {
     /// Codex only: working directory from the session_meta event.
     #[serde(default)]
     codex_project: String,
+    /// Codex only: `creator_user_id` from the session metadata.
+    #[serde(default)]
+    codex_user_id: String,
     /// Claude only: tokens already counted per assistant message id. Claude rewrites the same
     /// message id across several streaming lines with growing usage, and those lines can land in
     /// DIFFERENT scans — without this ledger the second scan would add the message's tokens all
@@ -139,6 +142,9 @@ struct SessionRecord {
     org: String,
     #[serde(default)]
     project: String,
+    /// Codex only: creator id used to map the session to an account email.
+    #[serde(default)]
+    creator_user_id: String,
     tokens: TokenBreakdown,
 }
 
@@ -180,6 +186,10 @@ pub fn build_report(
     org_labels: &BTreeMap<String, UsageOrgLabel>,
 ) -> UsageReport {
     let mut cache = load_cache(cache_path);
+    let codex_user_emails: BTreeMap<String, String> = codex_dirs
+        .iter()
+        .filter_map(|dir| crate::quota::codex_user_identity(dir))
+        .collect();
 
     // The app symlinks the shared session store across profile dirs + the machine default, so the
     // same physical JSONL is reachable from several config dirs. Resolve symlinks and scan each
@@ -214,7 +224,7 @@ pub fn build_report(
     save_cache(cache_path, &cache);
 
     let prices = load_price_table(price_cache_path);
-    build_report_from_cache(&cache, &prices, range_days, org_labels)
+    build_report_from_cache(&cache, &prices, range_days, org_labels, &codex_user_emails)
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +423,7 @@ fn scan_claude_file(path: &Path, cache: &mut UsageCache) {
             &entry.model,
             &entry.org,
             &entry.project,
+            "",
             &delta,
         );
     }
@@ -555,6 +566,9 @@ fn scan_codex_file(path: &Path, cache: &mut UsageCache) {
     let mut project = cursor
         .map(|c| c.codex_project.clone())
         .unwrap_or_default();
+    let mut creator_user_id = cursor
+        .map(|c| c.codex_user_id.clone())
+        .unwrap_or_default();
 
     let session_id = file_stem(path);
     let mut deltas: Vec<(String, String, String, TokenBreakdown)> = Vec::new();
@@ -568,6 +582,9 @@ fn scan_codex_file(path: &Path, cache: &mut UsageCache) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             return;
         };
+        if let Some(found) = codex_creator_user_id(&value) {
+            creator_user_id = found;
+        }
         if let Some(found) = codex_project(&value) {
             project = found;
             return;
@@ -622,6 +639,7 @@ fn scan_codex_file(path: &Path, cache: &mut UsageCache) {
             &model,
             "",
             &project,
+            &creator_user_id,
             &tokens,
         );
     }
@@ -633,6 +651,7 @@ fn scan_codex_file(path: &Path, cache: &mut UsageCache) {
     entry.codex_output = last_output;
     entry.codex_model = model;
     entry.codex_project = project;
+    entry.codex_user_id = creator_user_id;
 }
 
 struct CodexTotal {
@@ -677,6 +696,19 @@ fn codex_project(value: &serde_json::Value) -> Option<String> {
         return None;
     }
     project_path(value.get("payload")?)
+}
+
+fn codex_creator_user_id(value: &serde_json::Value) -> Option<String> {
+    if value.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
+        return None;
+    }
+    value
+        .get("payload")?
+        .get("creator_user_id")?
+        .as_str()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(ToString::to_string)
 }
 
 fn project_path(value: &serde_json::Value) -> Option<String> {
@@ -761,6 +793,7 @@ fn add_session(
     model: &str,
     org: &str,
     project: &str,
+    creator_user_id: &str,
     tokens: &TokenBreakdown,
 ) {
     let record = cache.sessions.entry(path_key.to_string()).or_insert_with(|| SessionRecord {
@@ -770,6 +803,7 @@ fn add_session(
         model: model.to_string(),
         org: org.to_string(),
         project: project.to_string(),
+        creator_user_id: creator_user_id.to_string(),
         tokens: TokenBreakdown::default(),
     });
     record.tokens.add(tokens);
@@ -781,6 +815,9 @@ fn add_session(
     }
     if !project.is_empty() {
         record.project = project.to_string();
+    }
+    if !creator_user_id.is_empty() {
+        record.creator_user_id = creator_user_id.to_string();
     }
 }
 
@@ -829,6 +866,7 @@ fn build_report_from_cache(
     prices: &PriceTable,
     range_days: u32,
     org_labels: &BTreeMap<String, UsageOrgLabel>,
+    codex_user_emails: &BTreeMap<String, String>,
 ) -> UsageReport {
     let today = today_local();
     let cutoff = cutoff_date(range_days);
@@ -842,6 +880,7 @@ fn build_report_from_cache(
                 &today,
                 cutoff.as_deref(),
                 org_labels,
+                codex_user_emails,
             )
         })
         .collect();
@@ -880,6 +919,7 @@ fn tool_usage(
     today: &str,
     cutoff: Option<&str>,
     org_labels: &BTreeMap<String, UsageOrgLabel>,
+    codex_user_emails: &BTreeMap<String, String>,
 ) -> ToolUsage {
     let tool = tool_id.as_str();
     let prefix = format!("{tool}|");
@@ -981,6 +1021,8 @@ fn tool_usage(
             .filter(|record| record.tool == tool),
         prices,
         cutoff,
+        org_labels,
+        codex_user_emails,
     );
 
     let mut sessions: Vec<SessionUsage> = cache
@@ -991,6 +1033,7 @@ fn tool_usage(
             id: record.id.clone(),
             date: record.date.clone(),
             model: record.model.clone(),
+            account_email: session_account_email(record, org_labels, codex_user_emails),
             tokens: record.tokens,
             cost_usd: prices.cost(&record.model, &record.tokens),
         })
@@ -1001,7 +1044,7 @@ fn tool_usage(
     // Claude splits usage per subscription org (the logged-in account); other tools have no
     // per-account attribution.
     let accounts = if matches!(tool_id, ToolId::Claude) {
-        account_usage(cache, prices, cutoff, org_labels)
+        account_usage(cache, prices, cutoff, org_labels, codex_user_emails)
     } else {
         Vec::new()
     };
@@ -1059,6 +1102,25 @@ fn rollup_day_models(
     (total, cost_usd, daily, by_model)
 }
 
+fn session_account_email(
+    record: &SessionRecord,
+    org_labels: &BTreeMap<String, UsageOrgLabel>,
+    codex_user_emails: &BTreeMap<String, String>,
+) -> Option<String> {
+    if record.tool == ToolId::Codex.as_str() {
+        return codex_user_emails.get(&record.creator_user_id).cloned();
+    }
+    record
+        .org
+        .strip_prefix(EMAIL_KEY_PREFIX)
+        .map(ToString::to_string)
+        .or_else(|| {
+            org_labels
+                .get(&record.org)
+                .and_then(|info| info.email.clone())
+        })
+}
+
 /// Builds the `ProjectUsage` rows for one scope — a whole tool (`ToolUsage::projects`) or a
 /// single account (`AccountUsage::projects`). `day_models` is the scope's path → date → model →
 /// tokens tree, already filtered to the range; `records` are the scope's session records (range
@@ -1069,6 +1131,8 @@ fn project_usage<'a>(
     records: impl Iterator<Item = &'a SessionRecord>,
     prices: &PriceTable,
     cutoff: Option<&str>,
+    org_labels: &BTreeMap<String, UsageOrgLabel>,
+    codex_user_emails: &BTreeMap<String, String>,
 ) -> Vec<ProjectUsage> {
     // path → (in-range session count, latest session date, in-range session rows).
     let mut project_sessions: BTreeMap<String, (u32, String, Vec<SessionUsage>)> =
@@ -1086,6 +1150,7 @@ fn project_usage<'a>(
                 id: record.id.clone(),
                 date: record.date.clone(),
                 model: record.model.clone(),
+                account_email: session_account_email(record, org_labels, codex_user_emails),
                 tokens: record.tokens,
                 cost_usd: prices.cost(&record.model, &record.tokens),
             });
@@ -1143,6 +1208,7 @@ fn account_usage(
     prices: &PriceTable,
     cutoff: Option<&str>,
     org_labels: &BTreeMap<String, UsageOrgLabel>,
+    codex_user_emails: &BTreeMap<String, String>,
 ) -> Vec<AccountUsage> {
     // A login email seen only in `session_context` (no org marker) belongs to the org the registry
     // resolved for that email, when there is one — fold it in so one account is one row.
@@ -1226,6 +1292,7 @@ fn account_usage(
                 id: record.id.clone(),
                 date: record.date.clone(),
                 model: record.model.clone(),
+                account_email: session_account_email(record, org_labels, codex_user_emails),
                 tokens: record.tokens,
                 cost_usd: prices.cost(&record.model, &record.tokens),
             });
@@ -1276,6 +1343,8 @@ fn account_usage(
                     .into_iter(),
                 prices,
                 cutoff,
+                org_labels,
+                codex_user_emails,
             );
             let info = org_labels.get(&org);
             let label = if org.is_empty() {

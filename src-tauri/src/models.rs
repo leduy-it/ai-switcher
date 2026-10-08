@@ -977,6 +977,9 @@ pub struct SessionUsage {
     /// Local date `YYYY-MM-DD` of the last activity in the session.
     pub date: String,
     pub model: String,
+    /// Login email inferred from this session's provider metadata, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_email: Option<String>,
     pub tokens: TokenBreakdown,
     pub cost_usd: Option<f64>,
 }

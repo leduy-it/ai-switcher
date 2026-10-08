@@ -441,6 +441,7 @@ export interface SessionUsage {
   id: string;
   date: string;
   model: string;
+  accountEmail?: string | null;
   tokens: TokenBreakdown;
   costUsd: number | null;
 }
