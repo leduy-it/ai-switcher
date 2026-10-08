@@ -18,7 +18,9 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/leduy-it/ai
 ## Features
 
 - **One window for every tool.** Log in, switch, rename, and remove accounts per tool.
-- **Menu-bar quick switch.** A tray icon in the macOS menu bar lists your Claude & Codex accounts (with quota % and plan) so you can switch without opening the window. The main sidebar also has a one-click quota overlay toggle. Closing the window hides the app to the tray; it keeps polling quota in the background.
+- **Menu-bar quota table.** Click the icon to open a glass table below it: all visible accounts, email, plan, 5-hour and weekly usage. Filter by provider or email, expand each account for reset times, command, read errors and refresh/switch actions. The footer opens the full app or enters full screen. Right-click retains the native quick-switch menu. The top sidebar also opens this dropdown.
+- **Minimizable floating overlay.** Pin quota above your other apps from the dropdown or Settings. Its minus button collapses to a small draggable logo bubble; click the logo to expand. Account rows include email and expandable details.
+- **Credential backups.** Export one provider from its account tab, or all providers from Settings. Private JSON files contain raw credentials (including original Codex `auth.json`), parsed fields, available email, account settings, quota and usage at export time. Hidden accounts are included. Exports contain plaintext tokens/API keys and should be stored privately; missing sources are explicitly noted.
 - **Quota at a glance.** Reads 5-hour / weekly usage for Claude & Codex and per-model quota for Antigravity, shows your **subscription plan** (Plus / Pro / Max) when the API reports it, and exposes Codex usage-limit reset credits in a per-account modal.
 - **Blue Liquid Glass identity.** A Michael Le Profiles logo, native macOS Liquid Glass window on macOS 26+, and a direct link to [duyle.me](https://duyle.me).
 - **Per-tool auto-switch.** Configure separately for Claude and Codex — the bare command falls back to another account when the active one nears its quota.
@@ -44,9 +46,23 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/leduy-it/ai
 
 ### Session prime
 
-> Earlier versions offered a scheduled "Auto Session" prime (a daily prime time, extend reminders, and macOS wake daemons). That has been **removed in 0.7.0** — every background/scheduled prime path could disturb a running CLI session (a background token refresh could log an interactive `claude` session out and force a manual `/login`). Only the manual, on-demand button remains.
+The legacy daemon/wake scheduler was removed in 0.7.0 because its token refresh paths could disrupt
+running CLI logins. Version 0.13.0 adds app-local automatic prime through the same read-only-token
+HTTP path as manual prime. The app must be running and the Mac awake.
 
-- **Prime ngay (on demand).** When the provider reports that an account has no active five-hour window, the card shows a manual prime button. Clicking it sends one minimal request directly over HTTP using the account's existing OAuth token — it never starts the Claude/Codex agent runtime, never spawns a CLI, and never rotates a token, so it cannot trigger macOS protected-folder prompts or disturb a running session. It runs a single attempt (send once, then confirm briefly); if confirmation doesn't land in time, press it again. The UI first says the request was sent and is awaiting confirmation, and reports an opened session only after the reset state is verified.
+- **Automatic Hello.** Enable it in Settings and choose visible Claude/Codex subscription accounts.
+  Pro and Team/Business plans use the same eligibility rules. The app checks every minute using
+  refreshed quota, validates the live five-hour state before sending, and sends one minimal Hello
+  only when a new window can be opened. It skips unknown/failed quota reads, hidden/API accounts and
+  weekly locks. Each attempt is recorded before sending and gets a durable five-hour cooldown,
+  including unconfirmed sends, so restarts cannot cause repeated greetings. Pause it in Settings.
+  It consumes a small amount of quota; it does not refill quota, reset the weekly limit, rotate a
+  token, launch a CLI, or install a wake daemon.
+  Codex Team/Business/Pro accounts that successfully report weekly quota without a five-hour bucket
+  receive a greeting at most once per five-hour cooldown; that result says Hello was sent rather than
+  claiming the provider opened a window it does not report.
+
+- **Bắt đầu phiên 5 giờ (on demand).** When the provider reports that an account has no active five-hour window, the card shows a manual prime button. Clicking it sends one minimal request directly over HTTP using the account's existing OAuth token — it never starts the Claude/Codex agent runtime, never spawns a CLI, and never rotates a token, so it cannot trigger macOS protected-folder prompts or disturb a running session. It runs a single attempt (send once, then confirm briefly); if confirmation doesn't land in time, press it again. The UI first says the request was sent and is awaiting confirmation, and reports an opened session only after the reset state is verified.
 - Quota for every account (including the machine default) is read live from the provider, so the displayed usage and reset time stay current and a refresh always reflects the real state.
 - **Codex usage-limit reset credits.** Codex account cards show a small reset-credit icon in the bottom action row when the provider reports reset-credit data. Click it to see how many resets remain and, when available, each reset credit's expiry time. Accounts with no available credits still show `0 available`; API/proxy accounts do not expose this provider quota data.
 - **Upgrading from an older version?** If you had the scheduled-prime wake daemons installed, open **Settings** — when leftover daemons are detected you'll see a one-tap **Gỡ daemon cũ** button that removes them (one admin prompt). The app also clears any stale wake schedule on first launch.

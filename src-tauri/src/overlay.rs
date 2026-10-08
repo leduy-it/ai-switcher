@@ -32,7 +32,7 @@ pub fn show(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(LABEL) {
         window.show()?;
         let _ = window.set_always_on_top(true);
-        let _ = window.set_ignore_cursor_events(settings.click_through);
+        let _ = window.set_ignore_cursor_events(settings.click_through && !settings.minimized);
         return Ok(());
     }
 
@@ -40,9 +40,9 @@ pub fn show(app: &AppHandle) -> tauri::Result<()> {
 
     let window = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("index.html".into()))
         .title("Quota")
-        .inner_size(rect.width, rect.height)
+        .inner_size(if settings.minimized { 70.0 } else { rect.width }, if settings.minimized { 70.0 } else { rect.height })
         .position(rect.x, rect.y)
-        .min_inner_size(190.0, 78.0)
+        .min_inner_size(70.0, 70.0)
         .decorations(false)
         .transparent(true)
         .always_on_top(true)
@@ -72,7 +72,7 @@ pub fn show(app: &AppHandle) -> tauri::Result<()> {
 
     // Keep it visible when the user switches Spaces / enters another full-screen app.
     let _ = window.set_visible_on_all_workspaces(true);
-    let _ = window.set_ignore_cursor_events(settings.click_through);
+    let _ = window.set_ignore_cursor_events(settings.click_through && !settings.minimized);
     Ok(())
 }
 
@@ -91,7 +91,13 @@ pub fn apply(app: &AppHandle, settings: &OverlaySettings) {
         hide(app);
     }
     if let Some(window) = app.get_webview_window(LABEL) {
-        let _ = window.set_ignore_cursor_events(settings.click_through);
+        let _ = window.set_ignore_cursor_events(settings.click_through && !settings.minimized);
+        let rect = sanitize_rect(app, settings.rect);
+        let _ = window.set_position(LogicalPosition::new(rect.x, rect.y));
+        let size = if settings.minimized { LogicalSize::new(70.0, 70.0) } else { LogicalSize::new(rect.width, rect.height) };
+        let _ = window.set_size(size);
+        let _ = window.set_resizable(!settings.minimized);
+        let _ = window.set_shadow(!settings.minimized);
     }
     sync_hover_watch(app, settings);
     let _ = app.emit("overlay-settings-changed", settings);
@@ -107,7 +113,7 @@ pub fn apply(app: &AppHandle, settings: &OverlaySettings) {
 fn sync_hover_watch(app: &AppHandle, settings: &OverlaySettings) {
     // Any running watcher belongs to the previous settings — retire it.
     let generation = HOVER_WATCH.fetch_add(1, Ordering::SeqCst) + 1;
-    if !(settings.enabled && settings.click_through) {
+    if !(settings.enabled && settings.click_through && !settings.minimized) {
         // Leaving click-through: drop any stale "hovered" state the watcher pushed.
         let _ = app.emit("overlay-hover", false);
         return;
@@ -190,34 +196,27 @@ fn sanitize_rect(app: &AppHandle, rect: OverlayRect) -> OverlayRect {
         return rect;
     }
 
-    // The title bar is invisible here, so require a decent slice of the window to be on-screen —
-    // enough that the user can always grab it and drag it back.
-    let visible = monitors.iter().any(|monitor| {
-        let scale = monitor.scale_factor();
-        let position: LogicalPosition<f64> = monitor.position().to_logical(scale);
-        let size: LogicalSize<f64> = monitor.size().to_logical(scale);
-        let overlap_x = (rect.x + rect.width).min(position.x + size.width) - rect.x.max(position.x);
-        let overlap_y =
-            (rect.y + rect.height).min(position.y + size.height) - rect.y.max(position.y);
-        overlap_x >= 80.0 && overlap_y >= 40.0
-    });
-
-    if !visible {
-        let primary = app
-            .primary_monitor()
-            .ok()
-            .flatten()
-            .or_else(|| monitors.first().cloned());
-        if let Some(monitor) = primary {
+    // A remembered panel could be mostly beyond the display edge. Keep its entire expanded
+    // surface reachable, even when it is currently a small bubble.
+    let target = monitors.iter().max_by(|a, b| {
+        let overlap = |monitor: &tauri::Monitor| {
             let scale = monitor.scale_factor();
-            let position: LogicalPosition<f64> = monitor.position().to_logical(scale);
-            rect.x = position.x + 40.0;
-            rect.y = position.y + 60.0;
-        } else {
-            let fallback = OverlayRect::default();
-            rect.x = fallback.x;
-            rect.y = fallback.y;
-        }
+            let position: LogicalPosition<f64> = monitor.work_area().position.to_logical(scale);
+            let size: LogicalSize<f64> = monitor.work_area().size.to_logical(scale);
+            let x = ((rect.x + rect.width).min(position.x + size.width) - rect.x.max(position.x)).max(0.0);
+            let y = ((rect.y + rect.height).min(position.y + size.height) - rect.y.max(position.y)).max(0.0);
+            x * y
+        };
+        overlap(a).total_cmp(&overlap(b))
+    });
+    if let Some(monitor) = target {
+        let scale = monitor.scale_factor();
+        let position: LogicalPosition<f64> = monitor.work_area().position.to_logical(scale);
+        let size: LogicalSize<f64> = monitor.work_area().size.to_logical(scale);
+        rect.width = rect.width.min((size.width - 16.0).max(70.0));
+        rect.height = rect.height.min((size.height - 16.0).max(70.0));
+        rect.x = rect.x.clamp(position.x + 8.0, (position.x + size.width - rect.width - 8.0).max(position.x + 8.0));
+        rect.y = rect.y.clamp(position.y + 8.0, (position.y + size.height - rect.height - 8.0).max(position.y + 8.0));
     }
     rect
 }

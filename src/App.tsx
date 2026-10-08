@@ -10,6 +10,7 @@ import {
   ChevronDown,
   CircleHelp,
   Copy,
+  Download,
   Eye,
   EyeOff,
   Gauge,
@@ -39,7 +40,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "./tauri";
 import { UsageView } from "./UsageView";
@@ -47,6 +48,7 @@ import michaelLogoUrl from "./assets/logo-michael.svg";
 import { applyProfileTheme } from "./theme";
 import type {
   Account,
+  AutoPrimeSettings,
   AddAccountInput,
   AddApiAccountInput,
   ApiGatewayCombo,
@@ -145,7 +147,6 @@ const emptySnapshot: AppSnapshot = {
 
 export function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
-  const [overlayEnabled, setOverlayEnabled] = useState<boolean | null>(null);
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Every full-snapshot fetch takes a ticket, and only the newest ticket may write state. Without
   // this a background quota poll that started before a switch/delete could land afterwards and put
@@ -208,31 +209,11 @@ export function App() {
     }
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .getOverlaySettings()
-      .then((settings) => {
-        if (!cancelled) setOverlayEnabled(settings.enabled);
-      })
-      .catch(() => undefined);
-    const unlisten = listen<OverlaySettings>("overlay-settings-changed", (event) =>
-      setOverlayEnabled(event.payload.enabled),
-    );
-    return () => {
-      cancelled = true;
-      void unlisten.then((fn) => fn());
-    };
-  }, []);
-
   const toggleOverlay = async () => {
     if (overlayBusy) return;
     setOverlayBusy(true);
     try {
-      const current = await api.getOverlaySettings();
-      const next = await api.setOverlayEnabled(!current.enabled);
-      setOverlayEnabled(next.enabled);
-      notify(next.enabled ? "Quota overlay is on top" : "Quota overlay hidden", "success");
+      await api.openQuotaPanel();
     } catch (err) {
       notify(errorMessage(err), "error");
     } finally {
@@ -559,21 +540,17 @@ export function App() {
         <aside className="sidebar">
           <div className="sidebarNav">
             <button
-              className={`toolTab ${overlayEnabled ? "selected" : ""}`}
+              className="toolTab"
               onClick={() => void toggleOverlay()}
-              disabled={overlayBusy || overlayEnabled === null}
-              title="Show or hide the always-on-top quota panel"
+              disabled={overlayBusy}
+              title="Open the quota table below the menu bar icon"
             >
               <span className="usageTabLabel">
                 <Layers />
-                Quota overlay
+                Quota dropdown
               </span>
               <small>
-                {overlayEnabled === null
-                  ? "Loading status…"
-                  : overlayEnabled
-                    ? "Always on top · click to hide"
-                    : "Click to show quota"}
+                Accounts · email · usage
               </small>
             </button>
             <div className="sideDivider" />
@@ -735,6 +712,7 @@ export function App() {
                 </div>
               </div>
               <div className="actions">
+                <CredentialExportButton toolId={currentTool.id} notify={notify} />
                 {currentTool.id === "antigravity" && (
                   <button
                     onClick={() =>
@@ -1173,10 +1151,11 @@ function SettingsView({
           <div className="settingsSectionHead">
             <AlarmClock />
             <div>
-              <strong>Prime</strong>
-              <small>Log hoạt động prime thủ công và dọn phần cũ nếu còn.</small>
+              <strong>Automatic 5-hour session</strong>
+              <small>Send one Hello for an inactive 5-hour window, or every 5 hours for plans that report weekly quota only.</small>
             </div>
           </div>
+          <AutoPrimeControls snapshot={snapshot} notify={notify} />
           <div className="wakeRow">
             <div className="wakeText">
               <strong>Nhật ký prime</strong>
@@ -1200,6 +1179,12 @@ function SettingsView({
         </div>
 
         <div className="settingsSection">
+          <div className="settingsSectionHead"><Download /><div><strong>Export credentials</strong><small>Raw authentication, available account email, profile fields, quota and usage at export time.</small></div></div>
+          <p className="orphanHint">Exports contain plaintext tokens and API keys. Save them somewhere private. Hidden accounts are included.</p>
+          <div className="credentialExportActions"><CredentialExportButton toolId={null} notify={notify} />{snapshot.tools.map((tool) => <CredentialExportButton key={tool.id} toolId={tool.id} notify={notify} />)}</div>
+        </div>
+
+        <div className="settingsSection">
           <div className="settingsSectionHead">
             <HardDrive />
             <div>
@@ -1212,6 +1197,51 @@ function SettingsView({
       </div>
     </section>
   );
+}
+
+function CredentialExportButton({ toolId, notify }: { toolId: ToolId | null; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
+  const [exporting, setExporting] = useState(false);
+  const label = toolId ? `${toolId === "codex" ? "Codex" : toolId === "claude" ? "Claude" : toolId}` : "all providers";
+  const exportFile = async () => {
+    setExporting(true);
+    try {
+      const path = await saveFileDialog({ title: `Export ${label} credentials (plaintext tokens)`, defaultPath: `michael-profiles-${toolId || "all"}-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: "Credential backup JSON", extensions: ["json"] }] });
+      if (!path) return;
+      const result = await api.exportCredentials(path, toolId, true);
+      notify(`Exported ${result.accountCount} accounts${result.warningCount ? ` · ${result.warningCount} unavailable sources noted in the file` : ""}`, result.warningCount ? "info" : "success");
+    } catch (error) { notify(errorMessage(error), "error"); }
+    finally { setExporting(false); }
+  };
+  return <button disabled={exporting} onClick={() => void exportFile()} title="Save raw credentials, email, quota and usage to a private JSON file">{exporting ? <Loader2 className="spin" size={14} /> : <Download size={14} />}Export {label}</button>;
+}
+
+function AutoPrimeControls({ snapshot, notify }: { snapshot: AppSnapshot; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
+  const [settings, setSettings] = useState<AutoPrimeSettings | null>(null);
+  const [saving, setSaving] = useState(false);
+  const rows = snapshot.tools.flatMap((tool) => tool.accounts.filter((account) => !account.hidden && !account.apiProvider && ["claude", "codex"].includes(tool.id)).map((account) => ({ account, key: `${tool.id}:${account.id}`, tool: tool.name })));
+  useEffect(() => {
+    let cancelled = false;
+    void api.getAutoPrimeSettings().then((next) => { if (!cancelled) setSettings(next); }).catch((error) => notify(errorMessage(error), "error"));
+    const listener = listen<AutoPrimeSettings>("auto-prime-changed", (event) => setSettings(event.payload));
+    return () => { cancelled = true; void listener.then((stop) => stop()); };
+  }, []);
+  const save = async (next: AutoPrimeSettings) => {
+    setSaving(true);
+    try { setSettings(await api.setAutoPrimeSettings(next)); }
+    catch (error) { notify(errorMessage(error), "error"); }
+    finally { setSaving(false); }
+  };
+  if (!settings) return <p className="orphanHint">Loading automation…</p>;
+  const picked = new Set(settings.accounts.length ? settings.accounts : rows.map((row) => row.key));
+  const toggle = (key: string) => {
+    const next = rows.filter((row) => row.key === key ? !picked.has(key) : picked.has(row.key)).map((row) => row.key);
+    void save({ ...settings, accounts: next, enabled: next.length > 0 && settings.enabled });
+  };
+  return <div className="autoPrimeControls">
+    <div className="wakeRow"><div className="wakeText"><strong>{settings.enabled ? "Automatic Hello is on" : "Automatic Hello is off"}</strong><span className="muted">Claude and Codex subscription accounts, including Pro and Team/Business. Uses the existing token and checks the live window before sending.</span></div><button disabled={saving || rows.length === 0} onClick={() => void save({ ...settings, enabled: !settings.enabled })}>{saving ? <Loader2 className="spin" size={14} /> : <AlarmClock size={14} />}{settings.enabled ? "Pause automation" : "Enable automation"}</button></div>
+    <p className="orphanHint">Runs while this app is open, including when its main window is hidden. Checks every minute using refreshed quota. An attempted greeting has a 5-hour cooldown, stored across restarts. Team/Business/Pro plans that report weekly quota only receive Hello without a claim that a 5-hour window opened. The Mac must be awake.</p>
+    <div className="autoPrimeAccounts">{rows.map(({ account, key, tool }) => { const record = settings.records[key]; return <div key={key} className="autoPrimeAccount"><label><input type="checkbox" checked={picked.has(key)} disabled={saving} onChange={() => toggle(key)} /><span><strong>{account.name} <small>{tool} · {account.quota?.plan || "Subscription"}</small></strong><span>{account.accountEmail || "Email unavailable"}</span></span></label>{record && <details><summary>{record.kind === "pending" ? "Attempt recorded" : record.kind === "success" ? "Window confirmed" : "Last attempt"} · {new Date(record.attemptedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</summary><p>{record.message}</p><small>Next eligible attempt: {new Date(record.nextAttemptAt).toLocaleString()}</small></details>}</div>; })}</div>
+  </div>;
 }
 
 /** Overlay controls in Settings: on/off, which accounts it shows, opacity, click-through.
@@ -1285,15 +1315,15 @@ function OverlaySettingsBar({
     <div className="overlaySettings">
       <div className="wakeRow">
         <div className="wakeText">
-          <strong>Hiện overlay</strong>
+          <strong>Floating quota overlay</strong>
           <span className="muted">
-            Luôn nổi trên cùng, kéo để di chuyển, kéo góc dưới phải để đổi kích thước. Mặc định mờ
-            để không che tầm nhìn, rê chuột vào là rõ lại. Bật/tắt nhanh ở menu bar.
+            Drag to move. Use the minus button to collapse into a small logo bubble; click the logo to expand. The quota table is available below the menu bar icon.
           </span>
         </div>
         <button onClick={() => void save({ ...settings, enabled: !settings.enabled })}>
           {settings.enabled ? "Tắt overlay" : "Bật overlay"}
         </button>
+        {settings.enabled && <button onClick={() => void save({ ...settings, minimized: !settings.minimized })}>{settings.minimized ? "Expand overlay" : "Minimize to bubble"}</button>}
       </div>
 
       <div className="overlayPicks">
@@ -2585,7 +2615,7 @@ function AccountCard({
           disabled={busy !== null}
           title="Gửi yêu cầu prime; app chỉ báo đã mở phiên sau khi xác nhận được reset mới"
         >
-          {primingNow ? <Loader2 className="spin" size={14} /> : <AlarmClock size={14} />} Prime ngay
+          {primingNow ? <Loader2 className="spin" size={14} /> : <AlarmClock size={14} />} Bắt đầu phiên 5 giờ
         </button>
       )}
 

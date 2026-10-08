@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import { OverlayApp } from "./OverlayApp";
+import { QuotaPanelApp } from "./QuotaPanelApp";
 import { applyProfileTheme, readProfileTheme } from "./theme";
 import "./styles.css";
 
@@ -22,11 +23,14 @@ function isOverlayWindow() {
 }
 
 const overlay = isOverlayWindow();
+const menubar = window.location.hash === "#menubar" ||
+  (window as unknown as { __TAURI_INTERNALS__?: { metadata?: { currentWindow?: { label?: string } } } }).__TAURI_INTERNALS__?.metadata?.currentWindow?.label === "menubar";
+if (menubar) document.documentElement.classList.add("qpWindow");
 if (overlay) {
   // Lets overlay.css punch the page background out so the window can be see-through.
   document.documentElement.classList.add("ovWindow");
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>{overlay ? <OverlayApp /> : <App />}</React.StrictMode>,
+  <React.StrictMode>{menubar ? <QuotaPanelApp /> : overlay ? <OverlayApp /> : <App />}</React.StrictMode>,
 );

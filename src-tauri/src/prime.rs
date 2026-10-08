@@ -4,7 +4,7 @@
 //!
 //! The old auto session prime (daily scheduler, extend reminders, pmset wake daemons) was removed —
 //! its background paths were the source of every /login + folder-permission incident. This module
-//! deliberately has NO background retries and NEVER spawns a CLI: everything is plain HTTP with the
+//! NEVER spawns a CLI: everything is plain HTTP with the
 //! account's existing token, so it cannot rotate a token or invalidate a live `claude` session.
 //!
 //! Verified upstream facts (see the prototype `scripts/session-prime-today.sh`):
@@ -57,6 +57,9 @@ pub const CODEX_CONFIRM_TOTAL_BUDGET: Duration = Duration::from_secs(125);
 /// The outcome of one prime attempt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PrimeOutcome {
+    /// A verified Team/Business/Pro account reports weekly quota but no five-hour bucket.
+    /// Greeting succeeded; do not claim that an unreported window was opened.
+    HelloSentWithoutWindow,
     /// Sent + confirmed the 5h window moved to a new reset. Carries the new `reset_at` (ISO).
     Success { new_reset_at: String },
     /// The old 5h window is still active; do not prime yet. Carries that window's `reset_at`.
@@ -76,6 +79,29 @@ pub enum PrimeOutcome {
 /// API-proxy accounts have no 5h window; Antigravity is unsupported.
 pub fn is_prime_eligible(tool_id: &ToolId, has_api_provider: bool) -> bool {
     !has_api_provider && matches!(tool_id, ToolId::Claude | ToolId::Codex)
+}
+
+pub fn supports_hello_only(quota: &crate::models::QuotaInfo) -> bool {
+    let plan = quota.plan.as_deref().unwrap_or("").to_lowercase();
+    quota.error.is_none() && quota.five_hour.percent_used.is_none() && quota.five_hour.reset_at.is_none()
+        && quota.weekly.percent_used.is_some_and(|used| used < 100.0)
+        && ["team", "business", "pro"].iter().any(|name| plan.contains(name))
+}
+
+/// Automation's greeting fallback is limited to a successful provider read that explicitly has
+/// weekly quota and no five-hour bucket. Authentication/read errors still fail closed.
+pub fn automatic_prime_account_traced(tool_id: &ToolId, config_dir: &Path, sleeper: impl FnMut(Duration), mut trace: impl FnMut(&str)) -> PrimeOutcome {
+    if matches!(tool_id, ToolId::Codex) {
+        let quota = quota::read_quota(tool_id, config_dir);
+        if supports_hello_only(&quota) {
+            trace("Provider reports weekly quota without a 5-hour bucket; send one Hello without claiming a new window");
+            return match send_hi_http(tool_id, config_dir) {
+                Ok(()) => PrimeOutcome::HelloSentWithoutWindow,
+                Err(reason) => PrimeOutcome::FailSend { reason },
+            };
+        }
+    }
+    prime_account_traced(tool_id, config_dir, sleeper, trace)
 }
 
 /// Run ONE bounded prime attempt (send once, confirm with a bounded poll), emitting a one-line
@@ -465,7 +491,7 @@ fn send_hi_http(tool_id: &ToolId, config_dir: &Path) -> Result<(), String> {
                 "model": CLAUDE_PRIME_MODEL,
                 "max_tokens": 1,
                 "system": [{"type": "text", "text": CLAUDE_CODE_SYSTEM_PREAMBLE}],
-                "messages": [{"role": "user", "content": "hi"}],
+                "messages": [{"role": "user", "content": "Hello"}],
             });
             client
                 .post("https://api.anthropic.com/v1/messages")
@@ -515,7 +541,7 @@ fn codex_prime_body() -> serde_json::Value {
         "input": [{
             "type": "message",
             "role": "user",
-            "content": [{"type": "input_text", "text": "Open a lightweight Codex session window. Reply exactly OK."}],
+            "content": [{"type": "input_text", "text": "Hello. Reply exactly OK."}],
         }],
         "store": false,
         "stream": true,
@@ -527,13 +553,29 @@ fn consume_prime_response(resp: reqwest::blocking::Response) -> Result<(), Strin
     if !status.is_success() {
         return Err(format!("HTTP {}", status.as_u16()));
     }
-    resp.bytes().map(|_| ()).map_err(|e| {
+    let streamed = resp.headers().get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok()).is_some_and(|value| value.contains("text/event-stream"));
+    let bytes = resp.bytes().map_err(|e| {
         if e.is_timeout() {
             "body timeout".to_string()
         } else {
             format!("body: {e}")
         }
-    })
+    })?;
+    if streamed {
+        let text = String::from_utf8_lossy(&bytes);
+        let mut completed = false;
+        for line in text.lines().filter_map(|line| line.strip_prefix("data:")) {
+            let Ok(event) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue; };
+            match event.get("type").and_then(serde_json::Value::as_str) {
+                Some("response.completed") => completed = true,
+                Some("error" | "response.failed" | "response.incomplete") => return Err("provider response did not complete".into()),
+                _ => {}
+            }
+        }
+        if !completed { return Err("stream ended without a completed response".into()); }
+    }
+    Ok(())
 }
 
 /// `reset_at` (ISO 8601) is strictly after now.

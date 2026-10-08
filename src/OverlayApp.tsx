@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Check, Loader2, RefreshCw, Settings2, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Loader2, Minus, RefreshCw, Settings2, X } from "lucide-react";
+import michaelLogo from "./assets/logo-michael.svg";
 import { api } from "./tauri";
 import { applyProfileTheme, type ProfileTheme } from "./theme";
-import type { AppSnapshot, OverlaySettings, QuotaInfo, QuotaWindow, ToolId } from "./types";
+import type { Account, AppSnapshot, OverlaySettings, QuotaInfo, QuotaWindow, ToolId } from "./types";
 import "./overlay.css";
 
 /** Rows are keyed `"<tool>:<accountId>"` so the same id under two tools can't collide. */
@@ -39,6 +40,7 @@ interface Row {
   /** Short badge, e.g. `Claude`, `Cursor`. */
   toolLabel: string;
   name: string;
+  account: Account;
   quota: QuotaInfo | null;
   /** The account the plain command currently uses (accounts only). */
   active: boolean;
@@ -57,6 +59,7 @@ function allRows(snapshot: AppSnapshot): Row[] {
         key: rowKey(tool.id, account.id),
         toolLabel: toolShortNames[tool.id],
         name: account.name,
+        account,
         quota: account.quota,
         active: tool.activeAccountId === account.id,
         isApi: Boolean(account.apiProvider),
@@ -217,6 +220,11 @@ export function OverlayApp() {
   const solid = hovered || showSettings;
   const opacity = solid ? settings.hoverOpacity : settings.opacity;
 
+  if (settings.minimized) return <div className="ovBubble" data-tauri-drag-region>
+    <button className="ovBubbleExpand" title="Expand quota overlay · drag the edge to move" aria-label="Expand quota overlay" onClick={() => void save({ ...settings, minimized: false })}><img src={michaelLogo} alt="" /></button>
+    <button className="ovBubbleClose" title="Hide overlay" aria-label="Hide overlay" onClick={close}><X size={10} /></button>
+  </div>;
+
   return (
     <div
       className="ovRoot"
@@ -226,8 +234,10 @@ export function OverlayApp() {
     >
       <header className="ovBar" data-tauri-drag-region>
         <span className="ovTitle" data-tauri-drag-region>
-          Quota
+          Live quota
         </span>
+        <button className="ovIcon" onClick={() => void save({ ...settings, minimized: true })} title="Minimize to a draggable bubble" aria-label="Minimize overlay"><Minus size={13} /></button>
+        <button className="ovIcon" onClick={() => void api.openMainWindow(false)} title="Open full app" aria-label="Open full app"><ArrowUpRight size={13} /></button>
         <button className="ovIcon" onClick={() => void refresh()} title="Làm mới quota" disabled={refreshing}>
           {refreshing ? <Loader2 className="ovSpin" size={12} /> : <RefreshCw size={12} />}
         </button>
@@ -289,6 +299,7 @@ function OverlayRow({ row, compact }: { row: Row; compact: boolean }) {
         {row.active && <span className="ovDot" title="Đang dùng" />}
         {quota?.plan && <span className="ovPlan">{quota.plan}</span>}
       </div>
+      <span className="ovEmail" title={row.account.accountEmail || undefined}>{row.account.accountEmail || "Email unavailable"}</span>
 
       {quota?.error && quota.rateLimitedUntil && windows.some((w) => w.percentUsed != null) ? (
         // Rate limited: keep the last good bars (dimmed) and say so in one line.
@@ -329,6 +340,7 @@ function OverlayRow({ row, compact }: { row: Row; compact: boolean }) {
           />
         ))
       )}
+      <details className="ovDetails"><summary>Account details <ChevronDown size={10} /></summary><div><span>{row.active ? "In use" : row.account.weeklyLock?.locked ? "Locked" : row.account.state === "needs-login" ? "Needs sign in" : "Ready"}</span><code>{row.account.launcherCommand || row.account.toolId}</code><span>Quota read: {quota?.updatedAt ? absoluteTime(quota.updatedAt) : "Not available"}</span>{rowWindows(quota).map((window, index) => <span key={index}>{window.label}: {window.resetAt ? absoluteTime(window.resetAt) : "No reset reported"}</span>)}</div></details>
     </div>
   );
 }

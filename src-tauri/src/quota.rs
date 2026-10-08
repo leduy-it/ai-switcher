@@ -755,7 +755,7 @@ pub fn claude_keychain_suffix(config_dir: &Path) -> String {
 /// config dir itself (older versions stored a per-dir file) → (3) ONLY when it is the default dir
 /// `~/.claude`: try the old global keychain name. Do NOT fall back to the global one for a profile
 /// dir, to avoid reading the wrong account's token.
-fn claude_credentials_blob(config_dir: &Path) -> Option<String> {
+pub(crate) fn claude_credentials_blob(config_dir: &Path) -> Option<String> {
     // For an app-managed DIR account, read the `.credentials.json` FILE first. The keychain item is
     // unreadable while the Mac is in DarkWake (woken in the background for a scheduled prime, before
     // any GUI login unlocks the login keychain) — `security` returns empty, which read as "no token"
