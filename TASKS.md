@@ -19,7 +19,7 @@ and release delivery; document remaining limitations and evidence with the corre
 | 8 | Michael Le (duyle) identity, blue logo/theme and duyle.me link | Implemented; original author thanked in documentation |
 | 9 | Update version, build and install the macOS app | Built and installed 0.14.0; installed binary matches the build and the new process is running. Frontend production build, Rust check and native macOS build passed. Native UI inspection is still unverified because the Mac was locked |
 | 10 | Native Liquid Glass, responsive UI, CSS and usage bars | Implemented |
-| 11 | GitHub authentication, push and merge into the user's fork | Prior releases published; 0.14.0 publication is tracked by its release pull request |
+| 11 | GitHub authentication, push and merge into the user's fork | Fork authentication configured; 0.14.0 published in [release PR #4](https://github.com/leduy-it/ai-switcher/pull/4), which records merge status |
 | 12 | List prior prompts and explain macOS refresh/install steps | Answered in the development chat |
 | 13 | Dropdown table below the menu-bar icon; expand each account; full-screen UI | Implemented |
 | 14 | Keep the floating overlay, improve its details and minimize like a pet | Implemented; draggable logo bubble and one-click expansion |
