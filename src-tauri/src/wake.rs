@@ -123,7 +123,7 @@ pub fn uninstall_legacy_daemons() -> Result<()> {
     .join("; ");
     run_as_admin(
         &shell,
-        "AI Account Switcher cần quyền admin để gỡ các daemon auto-prime cũ",
+        "Michael Le Profiles cần quyền admin để gỡ các daemon auto-prime cũ",
     )
 }
 

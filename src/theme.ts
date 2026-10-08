@@ -1,28 +1,10 @@
-export type ProfileTheme = "original" | "michael-blue";
-
-const STORAGE_KEY = "ai-account-switcher.profile-theme";
+export type ProfileTheme = "michael-blue";
 
 export function readProfileTheme(): ProfileTheme {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === "michael-blue"
-      ? "michael-blue"
-      : "original";
-  } catch {
-    return "original";
-  }
+  return "michael-blue";
 }
 
-export function applyProfileTheme(theme: ProfileTheme) {
-  document.documentElement.dataset.profileTheme = theme;
-  document.title =
-    theme === "michael-blue" ? "Michael Le (duyle) Profiles" : "AI Account Switcher";
-}
-
-export function saveProfileTheme(theme: ProfileTheme) {
-  applyProfileTheme(theme);
-  try {
-    window.localStorage.setItem(STORAGE_KEY, theme);
-  } catch {
-    // The current window still receives the selected theme if storage is unavailable.
-  }
+export function applyProfileTheme(_theme: ProfileTheme = "michael-blue") {
+  document.documentElement.dataset.profileTheme = "michael-blue";
+  document.title = "Michael Le Profiles";
 }

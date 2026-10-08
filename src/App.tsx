@@ -1,6 +1,7 @@
 import {
   AlarmClock,
   AlertTriangle,
+  ArrowUpRight,
   ArrowDown,
   ArrowUp,
   BarChart3,
@@ -42,9 +43,8 @@ import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "./tauri";
 import { UsageView } from "./UsageView";
-import logoUrl from "./assets/logo.svg";
 import michaelLogoUrl from "./assets/logo-michael.svg";
-import { ProfileTheme, readProfileTheme, saveProfileTheme } from "./theme";
+import { applyProfileTheme } from "./theme";
 import type {
   Account,
   AddAccountInput,
@@ -145,7 +145,6 @@ const emptySnapshot: AppSnapshot = {
 
 export function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
-  const [profileTheme, setProfileTheme] = useState<ProfileTheme>(() => readProfileTheme());
   const [overlayEnabled, setOverlayEnabled] = useState<boolean | null>(null);
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Every full-snapshot fetch takes a ticket, and only the newest ticket may write state. Without
@@ -202,13 +201,12 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    saveProfileTheme(profileTheme);
-    const title = profileTheme === "michael-blue" ? "Michael Le (duyle) Profiles" : "AI Account Switcher";
+    applyProfileTheme();
     if ("__TAURI_INTERNALS__" in window) {
-      void getCurrentWindow().setTitle(title).catch(() => {});
-      void emit("profile-theme-changed", profileTheme).catch(() => {});
+      void getCurrentWindow().setTitle("Michael Le Profiles").catch(() => {});
+      void emit("profile-theme-changed", "michael-blue").catch(() => {});
     }
-  }, [profileTheme]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -626,24 +624,16 @@ export function App() {
           </div>
 
           <div className="sidebarFoot">
-            <img
-              className="footLogo"
-              src={profileTheme === "michael-blue" ? michaelLogoUrl : logoUrl}
-              alt=""
-            />
+            <img className="footLogo" src={michaelLogoUrl} alt="" />
             <div className="footMeta">
-              <strong>
-                {profileTheme === "michael-blue" ? "Michael Le (duyle) Profiles" : "AI Account Switcher"}
-              </strong>
+              <strong>Michael Le Profiles</strong>
               <small>{version ? `v${version}` : ""}</small>
               <button
-                className="footBy"
-                onClick={() => void openUrl("https://hoangphan.blog/").catch(() => {})}
-                title="https://hoangphan.blog/"
+                className="footWebsite"
+                onClick={() => void openUrl("https://duyle.me/").catch(() => {})}
+                title="https://duyle.me/"
               >
-                {profileTheme === "michael-blue"
-                  ? "Original project by Hoàng Phan"
-                  : "Powered by Hoàng Phan"}
+                duyle.me <ArrowUpRight aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -711,8 +701,6 @@ export function App() {
             snapshot={snapshot}
             busy={busy !== null}
             notify={notify}
-            profileTheme={profileTheme}
-            onProfileThemeChange={setProfileTheme}
             onSetup={(toolId) => {
               setSelectedTool(toolId);
               setDialog("setup");
@@ -1053,16 +1041,12 @@ function SettingsView({
   snapshot,
   busy,
   notify,
-  profileTheme,
-  onProfileThemeChange,
   onSetup,
   onAutoSwitchChange,
 }: {
   snapshot: AppSnapshot;
   busy: boolean;
   notify: (text: string, kind?: "success" | "error" | "info") => void;
-  profileTheme: ProfileTheme;
-  onProfileThemeChange: (theme: ProfileTheme) => void;
   onSetup: (toolId: ToolId) => void;
   onAutoSwitchChange: (toolId: ToolId, enabled: boolean, threshold: number) => void;
 }) {
@@ -1127,31 +1111,16 @@ function SettingsView({
           <div className="settingsSectionHead">
             <Palette />
             <div>
-              <strong>Appearance</strong>
-              <small>Keep the original look or use your own blue profile theme.</small>
+              <strong>Michael Le Profiles</strong>
+              <small>Blue Liquid Glass interface</small>
             </div>
           </div>
-          <div className="themeOptions" role="group" aria-label="Application theme">
-            <button
-              type="button"
-              className={`themeOption ${profileTheme === "original" ? "selected" : ""}`}
-              aria-pressed={profileTheme === "original"}
-              onClick={() => onProfileThemeChange("original")}
-            >
-              Original · AI Account Switcher
-            </button>
-            <button
-              type="button"
-              className={`themeOption ${profileTheme === "michael-blue" ? "selected" : ""}`}
-              aria-pressed={profileTheme === "michael-blue"}
-              onClick={() => onProfileThemeChange("michael-blue")}
-            >
-              Michael Le (duyle) Profiles · Blue
-            </button>
-          </div>
-          <p className="themeCredit">
-            The original theme and logo remain available; the original project is by Hoàng Phan.
-          </p>
+          <button
+            className="brandLink"
+            onClick={() => void openUrl("https://duyle.me/").catch(() => {})}
+          >
+            duyle.me <ArrowUpRight aria-hidden="true" />
+          </button>
         </div>
 
         {cliTools.map((tool) => (

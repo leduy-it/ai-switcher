@@ -1,9 +1,21 @@
 # Changelog
 
-All notable changes to **AI Account Switcher** are documented here.
+All notable changes to **Michael Le Profiles** are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.12.0] - 2026-10-08
+
+### Changed
+
+- **Rebranded for Michael Le (duyle).** The app now uses one blue Liquid Glass identity and links to
+  [duyle.me](https://duyle.me). Hoàng Phan's original project credit is kept in the documentation.
+- **Native macOS Liquid Glass.** The main window and quota overlay use the system glass effect on
+  macOS 26+, with a native HUD material fallback on older macOS versions.
+- **Responsive layouts and glass quota bars.** Account, API, Usage, and Settings views adapt to
+  narrower windows; long Usage tables scroll horizontally instead of clipping.
+- The Codex reset-credit control uses a distinct reset icon, separate from quota refresh.
 
 ## [0.11.3] - 2026-10-08
 
