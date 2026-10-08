@@ -11,6 +11,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Gauge,
   HardDrive,
   Info,
   KeyRound,
@@ -2760,7 +2761,7 @@ function ResetCredits({ credits }: { credits?: RateLimitResetCredits | null }) {
         title={`Usage limit resets: ${credits.availableCount} available`}
         aria-label={`Usage limit resets: ${credits.availableCount} available`}
       >
-        <RotateCcw />
+        <Gauge />
         <span className="resetCreditsBadge">{credits.availableCount}</span>
       </button>
 

@@ -26,7 +26,8 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/hoangpm96/a
 
 - Each account logs into its own isolated config dir and gets a **dedicated command** (`claude-<name>`, `codex-<name>`) so you can run several accounts in parallel across terminals.
 - The bare `claude` / `codex` command **follows the account you select** (via a shell hook + an "active profile" file). Run `aisw` in an already-open terminal to sync it to the latest selection.
-- Chat sessions are **shared across accounts** in the same project, so you can resume work regardless of which account created it.
+- Chat sessions are **shared across accounts** in the same project, so you can resume work regardless of which account created it. Codex OAuth profiles keep their own `CODEX_HOME` and `auth.json`, while their launchers use the documented [`CODEX_SQLITE_HOME`](https://learn.chatgpt.com/docs/config-file/environment-variables) override to share the thread catalog with Codex Desktop. Session rollouts, archived rollouts, prompt history, and `session_index.jsonl` are linked to the default Codex home; existing index rows are merged before linking. API/proxy profiles remain isolated. A user-defined `sqlite_home` setting takes precedence over the environment variable and should point every profile at the same state directory.
+- The Codex shell hook also exports `CODEX_SQLITE_HOME` for subscription profiles, so legacy `CODEX_HOME` aliases inherit the shared session catalog. API/proxy launchers explicitly clear that override.
 - API/proxy accounts can point Claude Code or Codex at an external gateway, with one pinned model per generated launcher.
 
 ### Local API Gateway
