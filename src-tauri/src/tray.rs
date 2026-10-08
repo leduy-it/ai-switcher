@@ -11,7 +11,7 @@
 use crate::app_state::ManagedState;
 use crate::models::{Account, AccountState, AppSnapshot, SwitchAccountInput, ToolId, ToolStatus};
 use tauri::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_notification::NotificationExt;
 
@@ -27,6 +27,7 @@ const TRAY_TOOLS: [ToolId; 4] = [
 const SWITCH_PREFIX: &str = "switch:";
 const REFRESH_PREFIX: &str = "refresh:";
 const OVERLAY_ID: &str = "tray:overlay";
+const PANEL_ID: &str = "tray:quota-panel";
 const OPEN_ID: &str = "tray:open";
 const QUIT_ID: &str = "tray:quit";
 
@@ -43,7 +44,17 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .icon_as_template(true)
         .tooltip("Michael Le Profiles")
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                rect,
+                ..
+            } = event {
+                let _ = crate::menubar::toggle(tray.app_handle(), rect);
+            }
+        })
         .on_menu_event(handle_menu_event)
         .build(app)?;
     Ok(())
@@ -87,7 +98,8 @@ fn build_menu(app: &AppHandle, snapshot: Option<&AppSnapshot>) -> tauri::Result<
         }
     }
 
-    // Floating quota overlay on/off, checked when the window is up.
+    menu.append(&MenuItem::with_id(app, PANEL_ID, "Quota table…", true, None::<&str>)?)?;
+    // Floating quota remains an optional pinned view.
     let overlay_on = app
         .state::<ManagedState>()
         .overlay_settings()
@@ -96,7 +108,7 @@ fn build_menu(app: &AppHandle, snapshot: Option<&AppSnapshot>) -> tauri::Result<
     menu.append(&CheckMenuItem::with_id(
         app,
         OVERLAY_ID,
-        "Quota overlay",
+        "Pin floating quota overlay",
         true,
         overlay_on,
         None::<&str>,
@@ -246,6 +258,7 @@ fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     let id = event.id();
     match id.as_ref() {
         OPEN_ID => show_main_window(app),
+        PANEL_ID => { let _ = crate::menubar::show(app, None); },
         OVERLAY_ID => toggle_overlay(app),
         QUIT_ID => app.exit(0),
         other if other.starts_with(SWITCH_PREFIX) => switch_from_id(app, id),
@@ -335,9 +348,5 @@ fn toggle_overlay(app: &AppHandle) {
 }
 
 fn show_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+    let _ = crate::menubar::open_main(app, false);
 }

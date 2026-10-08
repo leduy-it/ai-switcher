@@ -5,6 +5,33 @@ All notable changes to **Michael Le Profiles** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-10-08
+
+### Added
+
+- Menu-bar quota table opens directly below the icon on click. Shows all visible accounts, email,
+  plan, 5-hour and weekly usage; provider/search filters and expandable rows reveal resets, commands,
+  refresh errors and reset credits. Open the main app normally or in full screen from its footer.
+- Floating quota overlay can minimize to a draggable logo bubble and expand with one click. Its
+  glass account rows now include email and expandable details; the pinned view remains optional.
+  Restored geometry is clamped to the display's usable area so expanded panels stay reachable.
+- App-local automatic Hello for eligible Claude/Codex subscription accounts, including Pro and
+  Team/Business. Uses existing tokens, checks the live window and serializes attempts with manual
+  prime. Durable 5-hour attempt cooldown prevents duplicate greetings after restarts or delayed
+  confirmation. Requires the app to be running and the Mac awake; no CLI, token rotation or wake daemon.
+  Codex Team/Business/Pro plans that report weekly quota only use a five-hour greeting cooldown;
+  the result reports a successful Hello without claiming an unreported session window.
+- Provider-specific and complete credential exports save private JSON backups with raw credential
+  sources, Codex auth fields/token claims, available account email, profile metadata, quota and usage.
+  Hidden accounts are included; unavailable sources are noted. Tokens stay in Rust and files are
+  written atomically with owner-only permissions on macOS.
+
+### Changed
+
+- The top sidebar shortcut opens the quota dropdown; floating overlay controls remain in Settings.
+- Manual prime is labeled “Bắt đầu phiên 5 giờ” and sends a minimal “Hello”.
+- Streamed prime requests require a completed-response event before reporting the greeting sent.
+
 ## [0.12.0] - 2026-10-08
 
 ### Changed

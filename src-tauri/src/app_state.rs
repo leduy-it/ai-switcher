@@ -1494,7 +1494,7 @@ impl ManagedState {
             std::thread::spawn(move || {
                 let _guard = _guard;
                 let state = app.state::<ManagedState>();
-                let result = state.run_manual_prime(&job, Some(&app));
+                let result = state.run_prime(&job, Some(&app), false);
                 let _ = app.emit(
                     "prime-now-done",
                     crate::models::PrimeNowDone {
@@ -1510,34 +1510,130 @@ impl ManagedState {
             });
         }
 
-        Ok(self.run_manual_prime(&job, None))
+        Ok(self.run_prime(&job, None, false))
+    }
+
+    pub fn auto_prime_settings(&self) -> Result<crate::models::AutoPrimeSettings> {
+        Ok(self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?.auto_prime.clone())
+    }
+
+    pub fn set_auto_prime_settings(&self, mut next: crate::models::AutoPrimeSettings) -> Result<crate::models::AutoPrimeSettings> {
+        let mut data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let mut seen = std::collections::HashSet::new();
+        next.accounts.retain(|key| seen.insert(key.clone()));
+        next.records = data.auto_prime.records.clone();
+        data.auto_prime = next.clone();
+        self.store.save(&data)?;
+        Ok(next)
+    }
+
+    /// Run at most one account per tick. Durable claims prevent repeated sends across restarts,
+    /// and the same guard as manual prime prevents concurrent HTTP requests.
+    pub fn auto_prime_tick(&self, app: &AppHandle) {
+        use std::sync::atomic::Ordering;
+        if self.priming.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() { return; }
+        let _guard = PrimingGuard::new(self);
+        let Ok(snapshot) = self.snapshot() else { return; };
+        let now = chrono::Utc::now();
+        let job = {
+            let Ok(mut data) = self.data.lock() else { return; };
+            if !data.auto_prime.enabled { return; }
+            let mut identities = std::collections::HashSet::new();
+            let candidate = snapshot.tools.iter().flat_map(|tool| tool.accounts.iter()).find(|account| {
+                let key = format!("{}:{}", account.tool_id.as_str(), account.id);
+                if account.hidden || account.is_locked() || account.state == AccountState::NeedsLogin
+                    || !crate::prime::is_prime_eligible(&account.tool_id, account.api_provider.is_some())
+                    || (!data.auto_prime.accounts.is_empty() && !data.auto_prime.accounts.contains(&key)) { return false; }
+                let identity = format!("{}:{}", account.tool_id.as_str(), account.account_email.as_deref().unwrap_or(&account.fingerprint).to_lowercase());
+                if !identities.insert(identity) { return false; }
+                let Some(quota) = &account.quota else { return false; };
+                let hello_only = account.tool_id == ToolId::Codex && crate::prime::supports_hello_only(quota);
+                if quota.error.is_some() || (quota.prime_available != Some(true) && !hello_only) || quota.weekly.percent_used.is_some_and(|used| used >= 100.0) { return false; }
+                let fresh = quota.updated_at.as_deref().and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                    .is_some_and(|stamp| now.signed_duration_since(stamp).num_minutes() < 10);
+                if !fresh { return false; }
+                !data.auto_prime.records.get(&key).and_then(|record| chrono::DateTime::parse_from_rfc3339(&record.next_attempt_at).ok())
+                    .is_some_and(|next| next > now)
+            }).cloned();
+            let Some(account) = candidate else { return; };
+            let default_dir = resolved_default_config_dir(&data, &account.tool_id);
+            let job = PrimeJob {
+                config_dir: account_config_dir_with_default(&self.store, &account, &default_dir),
+                tool_id: account.tool_id, account_id: account.id, account_name: account.name,
+            };
+            let key = format!("{}:{}", job.tool_id.as_str(), job.account_id);
+            // Persist BEFORE sending. An unconfirmed send or interrupted process gets a full 5h
+            // cooldown rather than potentially consuming quota with repeated greetings.
+            data.auto_prime.records.insert(key, crate::models::AutoPrimeRecord {
+                attempted_at: now.to_rfc3339(), next_attempt_at: (now + chrono::Duration::hours(5)).to_rfc3339(),
+                kind: "pending".into(), message: "Sending one Hello to open the 5-hour window".into(),
+            });
+            if self.store.save(&data).is_err() { return; }
+            job
+        };
+        self.append_prime_log(&format!("[AUTO PRIME] {} · {} — one Hello; existing token only", job.tool_id.as_str(), job.account_name));
+        if let Ok(settings) = self.auto_prime_settings() { let _ = app.emit("auto-prime-changed", settings); }
+        let result = self.run_prime(&job, Some(app), true);
+        if let Ok(mut data) = self.data.lock() {
+            let key = format!("{}:{}", job.tool_id.as_str(), job.account_id);
+            if let Some(record) = data.auto_prime.records.get_mut(&key) {
+                record.kind = result.kind.clone(); record.message = result.message.clone();
+            }
+            let _ = self.store.save(&data);
+        }
+        self.append_prime_log(&format!("[AUTO PRIME] {} · {} — {}", job.tool_id.as_str(), job.account_name, result.message));
+        if let Ok(settings) = self.auto_prime_settings() { let _ = app.emit("auto-prime-changed", settings); }
+        if let Ok(snapshot) = self.snapshot() { let _ = app.emit("snapshot-changed", snapshot); }
+        crate::tray::rebuild(app);
+    }
+
+    /// Raw secrets are collected and saved in Rust; only the file path/counts return to the UI.
+    pub fn export_credentials(&self, input: crate::models::CredentialsExportInput) -> Result<crate::models::CredentialsExportResult> {
+        let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?.clone();
+        let profiles = data.accounts.iter().filter(|account| input.tool_id.as_ref().is_none_or(|tool| tool == &account.tool_id)
+            && (input.include_hidden || !account.hidden)).map(|account| {
+                let default_dir = resolved_default_config_dir(&data, &account.tool_id);
+                let mut account = account.clone();
+                let dir = if account.tool_id == ToolId::Antigravity { self.store.account_dir(&account.tool_id, &account.id) }
+                    else { account_config_dir_with_default(&self.store, &account, &default_dir) };
+                if account.tool_id == ToolId::Codex { account.account_email = crate::quota::codex_account_email(&dir); }
+                if account.tool_id == ToolId::Claude {
+                    account.account_email = data.claude_orgs.values().find(|org| org.account_ids.contains(&account.id)).and_then(|org| org.email.clone());
+                }
+                (account, dir)
+            }).collect();
+        let usage = Some(self.usage_report(0));
+        crate::credential_export::save(input, profiles, usage)
     }
 
     /// Blocking core of a manual prime: send one lightweight request, confirm, log the outcome and
     /// refresh the account's quota on success. Split out so `prime_now` can run it on a background
     /// thread (GUI) or inline (tests). The caller holds the overlap guard for the duration.
-    fn run_manual_prime(&self, job: &PrimeJob, app: Option<&AppHandle>) -> crate::models::PrimeNowResult {
+    fn run_prime(&self, job: &PrimeJob, app: Option<&AppHandle>, automatic: bool) -> crate::models::PrimeNowResult {
         use crate::prime::PrimeOutcome;
 
         let trace_prefix = format!(
-            "[PRIME NGAY] {} · account \"{}\" —",
+            "[{}] {} · account \"{}\" —",
+            if automatic { "AUTO HELLO" } else { "PRIME NOW" },
             job.tool_id.prime_label(),
             job.account_name,
         );
         let trace = |line: &str| self.append_prime_log(&format!("{trace_prefix} {line}"));
-        let outcome = crate::prime::prime_account_traced(
-            &job.tool_id,
-            &job.config_dir,
-            std::thread::sleep,
-            trace,
-        );
+        let outcome = if automatic {
+            crate::prime::automatic_prime_account_traced(&job.tool_id, &job.config_dir, std::thread::sleep, trace)
+        } else {
+            crate::prime::prime_account_traced(&job.tool_id, &job.config_dir, std::thread::sleep, trace)
+        };
 
         // On success, refresh the displayed quota right away so the card shows the new reset.
-        if matches!(outcome, PrimeOutcome::Success { .. }) {
+        if matches!(outcome, PrimeOutcome::Success { .. } | PrimeOutcome::HelloSentWithoutWindow) {
             let _ = self.refresh_single_account(&job.tool_id, &job.account_id, app);
         }
 
         let (kind, message) = match &outcome {
+            PrimeOutcome::HelloSentWithoutWindow => (
+                "info", "Hello sent successfully. This provider reports weekly quota without a 5-hour window; the next automatic greeting is eligible after the 5-hour cooldown.".to_string(),
+            ),
             PrimeOutcome::Success { new_reset_at } if matches!(job.tool_id, ToolId::Codex) => (
                 "success",
                 format!(
@@ -3084,6 +3180,12 @@ fn build_snapshot(
                     let config_dir =
                         account_config_dir_with_default(store, account, &default_dir);
                     account.account_email = crate::quota::codex_account_email(&config_dir);
+                }
+            }
+            if matches!(tool_id, ToolId::Claude) {
+                for account in accounts.iter_mut() {
+                    account.account_email = data.claude_orgs.values()
+                        .find(|org| org.account_ids.contains(&account.id)).and_then(|org| org.email.clone());
                 }
             }
             // Antigravity: attach the Google avatar (account identity) for the UI to display.

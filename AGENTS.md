@@ -20,6 +20,9 @@
 - `app_state.rs`: high-level account workflows: snapshot, add, switch, delete, refresh, auto-switch.
 - `quota.rs`: quota readers for Claude, Codex, Cursor CLI, opencode Zen, Antigravity.
 - `overlay.rs`: the always-on-top quota overlay window (second frameless window, label `overlay`).
+- `menubar.rs`: a separate quota-table dropdown anchored to the status icon (label `menubar`).
+- `credential_export.rs`: explicit provider/all credential backups; secrets stay in Rust and the
+  JSON is saved atomically with owner-only permissions, including raw auth sources and usage.
 - `usage.rs`: scans Claude/Codex JSONL logs and builds the Usage tab report.
 - `pricing.rs`: LiteLLM price cache and model-price lookup.
 
@@ -72,7 +75,12 @@
 - `src/App.tsx` is the main UI: tool tabs, account cards, modals, auto-switch settings.
 - `src/UsageView.tsx` renders token/cost usage.
 - `src/OverlayApp.tsx` + `src/overlay.css` render the floating quota overlay; `src/main.tsx` picks it by window label.
-- `src/theme.ts` persists the appearance selection and applies it to both the main window and overlay.
+- The overlay may collapse to a draggable logo bubble. While minimized, resize events must not
+  overwrite its expanded geometry, and cursor pass-through must be disabled so it can expand.
+- `src/QuotaPanelApp.tsx` + `src/quota-panel.css` render the menu-bar dropdown with all visible
+  accounts, email, quota, filters, details and full-window actions. Left click opens it; right click
+  retains the native menu. Hide it on blur/Escape instead of destroying the preloaded webview.
+- `src/theme.ts` applies the single Michael Le blue appearance to all windows.
 - `src/tauri.ts` wraps invoke calls and contains mock data for browser/dev fallback.
 - `src/types.ts` mirrors Rust DTOs.
 
@@ -88,4 +96,9 @@
 - Do not delete user profile dirs or CLI config unless the user explicitly asks.
 - When changing shared-profile behavior, preserve credential isolation and skip API/proxy accounts.
 - Codex API/proxy profiles must unset `CODEX_SQLITE_HOME` so their gateway-specific state stays isolated.
+- App-local auto-prime uses the manual HTTP prime implementation, the same overlap guard and a
+  durable five-hour claim recorded before sending. Skip hidden, API, locked and unknown-quota
+  accounts. A successful Codex quota read for Team/Business/Pro with weekly quota but no five-hour
+  bucket may send a greeting once per five-hour cooldown; report Hello sent without claiming a new
+  window. Never rotate tokens or spawn a CLI/wake daemon to run automatic greetings.
 - Prefer idempotent repair/migration during startup (`ManagedState::heal_active_profiles`) so existing accounts self-heal.

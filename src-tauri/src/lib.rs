@@ -1,7 +1,9 @@
 mod api_gateway;
 mod app_state;
+mod credential_export;
 mod detection;
 mod models;
+mod menubar;
 mod overlay;
 mod prime;
 mod pricing;
@@ -442,6 +444,37 @@ fn get_snapshot(state: State<'_, ManagedState>) -> Result<AppSnapshot, String> {
 }
 
 #[tauri::command]
+fn open_quota_panel(app: tauri::AppHandle) -> Result<(), String> {
+    menubar::show(&app, None).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn close_quota_panel(app: tauri::AppHandle) { menubar::hide(&app); }
+
+#[tauri::command]
+fn open_main_window(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
+    menubar::open_main(&app, fullscreen).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_auto_prime_settings(state: State<'_, ManagedState>) -> Result<models::AutoPrimeSettings, String> {
+    state.auto_prime_settings().map_err(display_error)
+}
+
+#[tauri::command]
+fn set_auto_prime_settings(app: tauri::AppHandle, state: State<'_, ManagedState>, input: models::AutoPrimeSettings) -> Result<models::AutoPrimeSettings, String> {
+    let settings = state.set_auto_prime_settings(input).map_err(display_error)?;
+    let _ = app.emit("auto-prime-changed", &settings);
+    Ok(settings)
+}
+
+#[tauri::command]
+async fn export_credentials(app: tauri::AppHandle, input: models::CredentialsExportInput) -> Result<models::CredentialsExportResult, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<ManagedState>().export_credentials(input).map_err(display_error))
+        .await.map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn get_overlay_settings(state: State<'_, ManagedState>) -> Result<OverlaySettings, String> {
     state.overlay_settings().map_err(display_error)
 }
@@ -509,6 +542,12 @@ pub fn run() {
             load_snapshot,
             get_snapshot,
             get_overlay_settings,
+            open_quota_panel,
+            close_quota_panel,
+            open_main_window,
+            get_auto_prime_settings,
+            set_auto_prime_settings,
+            export_credentials,
             set_overlay_settings,
             set_overlay_enabled,
             refresh_tool,
@@ -570,6 +609,7 @@ pub fn run() {
 
             // Menu-bar (tray) icon for quick account switching without opening the window.
             tray::create(app.handle())?;
+            menubar::create(app.handle())?;
 
             // Reopen the floating quota overlay if it was left on last time. Going through
             // `apply` (not `show`) also restores click-through and starts the pointer watcher.
@@ -594,6 +634,14 @@ pub fn run() {
                     let _ = warm_handle.emit("snapshot-changed", snapshot);
                 }
                 tray::rebuild(&warm_handle);
+                state.auto_prime_tick(&warm_handle);
+            });
+
+            // App-local automation: no launch daemon, wake schedule, CLI, or token refresh.
+            let prime_handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(60));
+                prime_handle.state::<ManagedState>().auto_prime_tick(&prime_handle);
             });
 
             // Background poller: periodically refresh quota + auto-switch if enabled.
@@ -624,6 +672,17 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == menubar::LABEL {
+                match event {
+                    tauri::WindowEvent::Focused(false) => menubar::dismiss_on_blur(window.app_handle()),
+                    tauri::WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        menubar::hide(window.app_handle());
+                    }
+                    _ => {}
+                }
+                return;
+            }
             // Close (✕) hides the main window to the tray instead of quitting — the poller and
             // tray stay alive so quick-switch keeps working. Quit is via the tray menu.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -653,6 +712,7 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Resized(size) => {
                     if let Ok(current) = state.overlay_settings() {
+                        if current.minimized { return; }
                         let logical = size.to_logical::<f64>(scale);
                         let _ = state.set_overlay_rect(OverlayRect {
                             width: logical.width,

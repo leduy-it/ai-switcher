@@ -12,6 +12,8 @@ import type {
   CreateVirtualApiAccountInput,
   OrphanAccountDir,
   OverlaySettings,
+  AutoPrimeSettings,
+  CredentialsExportResult,
   PrimeNowInput,
   PrimeNowResult,
   RateLimitResetCredits,
@@ -428,6 +430,10 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
   }
 
   await new Promise((resolve) => window.setTimeout(resolve, 120));
+  if (["open_quota_panel", "close_quota_panel", "open_main_window"].includes(command)) return undefined as T;
+  if (command === "get_auto_prime_settings" || command === "set_auto_prime_settings") {
+    return { enabled: false, accounts: [], records: {}, ...(args?.input as object | undefined) } as T;
+  }
   if (command === "load_snapshot" || command === "get_snapshot" || command === "refresh_tool") {
     return structuredClone(demoSnapshot) as T;
   }
@@ -687,6 +693,12 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
 }
 
 export const api = {
+  getAutoPrimeSettings: () => invoke<AutoPrimeSettings>("get_auto_prime_settings"),
+  setAutoPrimeSettings: (input: AutoPrimeSettings) => invoke<AutoPrimeSettings>("set_auto_prime_settings", { input }),
+  exportCredentials: (path: string, toolId: ToolId | null, includeHidden: boolean) => invoke<CredentialsExportResult>("export_credentials", { input: { path, toolId, includeHidden } }),
+  openQuotaPanel: () => invoke<void>("open_quota_panel"),
+  closeQuotaPanel: () => invoke<void>("close_quota_panel"),
+  openMainWindow: (fullscreen = false) => invoke<void>("open_main_window", { fullscreen }),
   loadSnapshot: () => invoke<AppSnapshot>("load_snapshot"),
   /** Cached snapshot without the pending-login recheck — for the overlay's polling. */
   getSnapshot: () => invoke<AppSnapshot>("get_snapshot"),

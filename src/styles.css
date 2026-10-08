@@ -3850,3 +3850,17 @@ textarea {
     background: rgba(10, 25, 44, 0.96);
   }
 }
+/* Automatic session and explicit credential backup controls. */
+.credentialExportActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.autoPrimeControls { display: flex; flex-direction: column; gap: 12px; }
+.autoPrimeAccounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 8px; }
+.autoPrimeAccount { padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(114, 173, 255, .06); }
+.autoPrimeAccount label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.autoPrimeAccount input { margin-top: 3px; accent-color: var(--accent); }
+.autoPrimeAccount label > span { display: flex; flex-direction: column; min-width: 0; }
+.autoPrimeAccount strong { font-size: 12px; }
+.autoPrimeAccount strong small { font-size: 10px; color: var(--text-2); font-weight: 400; }
+.autoPrimeAccount label > span > span { font-size: 11px; color: var(--text-2); overflow-wrap: anywhere; }
+.autoPrimeAccount details { margin: 8px 0 0 23px; font-size: 10px; color: var(--text-2); }
+.autoPrimeAccount summary { cursor: pointer; color: var(--accent-bright); }
+.autoPrimeAccount details p { margin: 6px 0; }

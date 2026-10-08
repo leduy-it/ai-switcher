@@ -63,6 +63,7 @@ export interface OverlayRect {
 export interface OverlaySettings {
   /** Overlay window shown (and restored on next app start). */
   enabled: boolean;
+  minimized?: boolean;
   /** `"<tool>:<accountId>"` rows to render. Empty = the account in use of each CLI. */
   accounts: string[];
   /** Opacity while the pointer is elsewhere, 0.15..1 — low enough to see through. */
@@ -356,6 +357,18 @@ export interface PrimeNowResult {
    */
   kind: "success" | "info" | "error" | "pending";
   message: string;
+}
+
+export interface AutoPrimeSettings {
+  enabled: boolean;
+  accounts: string[];
+  records: Record<string, { attemptedAt: string; nextAttemptAt: string; kind: string; message: string }>;
+}
+
+export interface CredentialsExportResult {
+  path: string;
+  accountCount: number;
+  warningCount: number;
 }
 
 /** Payload of the `prime-now-done` event: the final result of a backgrounded manual prime. */

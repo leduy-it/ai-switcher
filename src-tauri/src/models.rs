@@ -547,6 +547,9 @@ impl Default for OverlayRect {
 pub struct OverlaySettings {
     /// Whether the overlay window is shown (restored on next app start).
     pub enabled: bool,
+    /// Collapse into a draggable, clickable logo bubble.
+    #[serde(default)]
+    pub minimized: bool,
     /// `"<tool>:<accountId>"` rows to render. Empty = the active account of each CLI.
     #[serde(default)]
     pub accounts: Vec<String>,
@@ -581,6 +584,7 @@ impl Default for OverlaySettings {
     fn default() -> Self {
         Self {
             enabled: false,
+            minimized: false,
             accounts: Vec::new(),
             opacity: default_overlay_opacity(),
             hover_opacity: default_overlay_hover_opacity(),
@@ -612,6 +616,43 @@ impl Default for AutoSwitchSetting {
 pub struct PrimeNowInput {
     pub tool_id: ToolId,
     pub account_id: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoPrimeSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Empty means all visible subscription accounts, independent of plan name.
+    #[serde(default)]
+    pub accounts: Vec<String>,
+    #[serde(default)]
+    pub records: std::collections::BTreeMap<String, AutoPrimeRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoPrimeRecord {
+    pub attempted_at: String,
+    pub next_attempt_at: String,
+    pub kind: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialsExportInput {
+    pub path: std::path::PathBuf,
+    pub tool_id: Option<ToolId>,
+    pub include_hidden: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialsExportResult {
+    pub path: std::path::PathBuf,
+    pub account_count: usize,
+    pub warning_count: usize,
 }
 
 /// Result of an on-demand "Prime ngay": a short message plus a kind the UI maps to a toast colour.
