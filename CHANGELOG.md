@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.14.0 — Desktop account handoff and recovery
+
+- Add a Codex JSON paste box with Parse JSON, email/field-name preview and duplicate detection,
+  alongside file import. Both paths validate locally and use the same private profile import.
+- Add a living repository requirements reference, indexed task tracking and reusable migration
+  prompts. Agent instructions require documentation updates alongside relevant feature changes.
+- Separate CLI selection from desktop identity confirmation for Codex.app and ChatGPT.app.
+- Queue safe desktop handoffs; preserve the profile's credential file, main session catalog and
+  desktop sidebar/project state. Use normal macOS app quit and explicit launch paths.
+- Refresh quota immediately after selection and credential changes, broadcasting to all windows.
+  Remove the shared-rollout fallback that could display another account's quota after a live error.
+- Add private durable recovery checkpoints, guarded same-thread interruption/continuation,
+  acknowledgement/history checks, pending cancellation and safe retry. Unsupported sessions remain
+  visible as needing attention. Existing unmanaged desktops wait until the user closes them.
+- Add desktop status, app selector and per-session recovery controls to main UI/dropdown, with
+  a concise status in the floating overlay. Preserve task indices and extend the list through 22.
+- Migrate missing thread catalog entries and complete absent paginated histories into the main
+  SQLite home with consistent private snapshots. Preserve creator/source fields, organization,
+  tools and attachments; detect partial histories instead of overwriting them. Add a GUI repair
+  button and guard against explicit config overrides and old daemon launch paths.
+- Resolve short backend socket symlinks for long profile paths. Distinguish pending metadata from
+  conflicting history, preserve existing cursors and record imported/skipped IDs in private manifests.
+- Queue a controlled desktop reload after external CLI selection or a selected-profile identity
+  mismatch when sync is enabled; preserve unresolved recovery checkpoints across selection changes.
+
 All notable changes to **Michael Le Profiles** are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

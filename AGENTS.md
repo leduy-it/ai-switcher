@@ -1,5 +1,24 @@
 # AI Account Switcher Project Memory
 
+## Living requirements and task tracking
+
+- Read [docs/requirements.md](docs/requirements.md) and [TASKS.md](TASKS.md) before feature work.
+  The requirements document is the authoritative specification; TASKS.md records current progress.
+- For every relevant feature, behavior, provider, UI, credential/session storage, migration or
+  release change, update affected requirements and acceptance checks in the same change as the
+  implementation. Update the matching task status and material limitations, plus README/changelog
+  and docs/prompts when their statements or coverage change.
+- Preserve requirement/task indices. Append new indices for new requests; retain superseded or
+  retired entries and record the latest user decision. Migration audits must cover every current
+  requirement and baseline ID rather than a frozen list.
+- Separate source implementation, validation performed, installed-app version and published
+  release. Do not claim a feature is validated merely because code exists or compilation succeeds.
+- Review the documents against final behavior before reporting completion. If behavior and
+  requirements did not change, preserve the specification and update only relevant progress/evidence.
+- Keep this reference in the repository. Personal notes, Pages and exports are snapshots; do not
+  treat them as the maintained source. Never add tokens, raw credential exports, private session
+  contents or machine-specific recovery manifests to public documentation.
+
 ## Shape
 
 - Desktop app: Tauri 2 + React/Vite.
@@ -68,9 +87,29 @@
 - Codex OAuth `auth.json` imports copy only validated OAuth profile files into Switcher's profile dir
   with private file permissions; never link the source credential. Account email is display metadata
   extracted from JWT claims only, not token content sent to the UI.
+- `codex_import.rs` accepts one raw OAuth source: pasted JSON or a file. Parsing is local and has
+  no provider calls or account writes. Return email/field names/duplicate status only; never echo
+  token values in errors or persist the dialog's pasted JSON outside the private import flow.
 - Do not apply shared config symlinks to API/proxy accounts, because their gateway/model/key config is intentionally account-specific.
 
 ## Frontend Notes
+
+- `desktop.rs`, `desktop_rpc.rs` and `desktop_recovery.rs` manage explicit local desktop handoffs.
+  Desktop and CLI selection are separate statuses. Never infer desktop identity from auth.json;
+  verify the launched profile and the running backend's account/read email/workspace.
+- Default handoffs wait for active turns. Unknown/unmanaged desktop execution homes wait until
+  closed. Do not force-quit apps, interrupt unrelated CLI sessions, or reconstruct ephemeral/cloud
+  or native client-owned tool runtimes. Native brands share one desktop data folder, so run one
+  brand at a time. Never copy or symlink auth.json for desktop handoff.
+- Recovery checkpoints are private app-data files, written atomically with fsync and owner-only
+  permissions. Record interruption/send intent before RPC mutations. Resume only a turn interrupted
+  by that operation; inspect history/acknowledgement after uncertain sends and never resend blindly.
+- Codex quota must come from the selected identity's live endpoint. Shared rollout limits are not
+  a valid fallback, since another account can have written them.
+- `session_migration.rs` repairs known local catalog/history schemas additively using SQLite
+  snapshots and private backups. Never replace existing threads or projection cursors, symlink
+  live databases, or import enrollments/auth/daemon tables. Partial histories and unknown schemas
+  need attention. Preserve the previously restored morning chats; do not continue completed work.
 
 - `src/App.tsx` is the main UI: tool tabs, account cards, modals, auto-switch settings.
 - `src/UsageView.tsx` renders token/cost usage.

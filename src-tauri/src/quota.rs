@@ -3,7 +3,7 @@ use crate::tools::home_dir;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -630,11 +630,7 @@ pub(crate) fn claude_token_expiry_hhmm(config_dir: &Path) -> String {
         return "?".to_string();
     };
     chrono::DateTime::from_timestamp_millis(ms)
-        .map(|dt| {
-            dt.with_timezone(&chrono::Local)
-                .format("%H:%M")
-                .to_string()
-        })
+        .map(|dt| dt.with_timezone(&chrono::Local).format("%H:%M").to_string())
         .unwrap_or_else(|| "?".to_string())
 }
 
@@ -694,7 +690,9 @@ fn claude_token_still_valid(value: &serde_json::Value) -> bool {
         .get("claudeAiOauth")
         .and_then(|oauth| oauth.get("expiresAt"))
         .and_then(serde_json::Value::as_i64)
-        .is_some_and(|expiry| expiry > chrono::Utc::now().timestamp_millis() + CLAUDE_TOKEN_EXPIRY_SKEW_MS)
+        .is_some_and(|expiry| {
+            expiry > chrono::Utc::now().timestamp_millis() + CLAUDE_TOKEN_EXPIRY_SKEW_MS
+        })
 }
 
 /// Atomically write a credential blob to a `.credentials.json` file (temp-write + rename), with
@@ -1163,32 +1161,9 @@ fn read_codex_quota(config_dir: &Path) -> Result<QuotaInfo> {
     // the provider (via the token in config_dir/auth.json), so it's current and correct no matter
     // which account last ran the CLI.
     //
-    // The rollout file (~/.codex/sessions/.../rollout-*.jsonl) is only a FALLBACK now: it's shared
-    // by every account (profile accounts symlink their sessions/ back to ~/.codex/sessions), so it
-    // reflects whichever account last ran the CLI — not necessarily this one — and it's only updated
-    // when the CLI runs, so it goes stale (it can be months old if you haven't used the CLI). Using
-    // it as the primary source for the default account made "Default (máy)" show a frozen percentage
-    // that Refresh never updated, while a profile account on the same login showed the live number.
-    match read_codex_usage_endpoint(config_dir) {
-        Ok(quota) => Ok(quota),
-        Err(endpoint_err) => {
-            // Endpoint failed (offline, token issue): for the default account, a (possibly stale)
-            // rollout reading still beats showing nothing.
-            if config_dir == home_dir().join(".codex") {
-                if let Ok(quota) = read_codex_rollout_quota() {
-                    return Ok(quota);
-                }
-            }
-            Err(endpoint_err)
-        }
-    }
-}
-
-fn read_codex_rollout_quota() -> Result<QuotaInfo> {
-    let sessions = home_dir().join(".codex/sessions");
-    let limits = latest_codex_rate_limits(&sessions)
-        .context("rate_limits not found in the Codex session")?;
-    quota_from_codex_rate_limits(&limits)
+    // History is shared across identities. Its last rate_limits event may belong to another
+    // account, so it cannot safely replace a failed live read for the machine-default account.
+    read_codex_usage_endpoint(config_dir)
 }
 
 /// Fallback: calls `GET https://chatgpt.com/backend-api/wham/usage` with the JWT in
@@ -1586,11 +1561,8 @@ fn jwt_email(token: &str) -> Option<String> {
 
 fn jwt_claims(token: &str) -> Option<serde_json::Value> {
     let payload = token.split('.').nth(1)?;
-    let bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
-        payload,
-    )
-    .ok()?;
+    let bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, payload).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -1766,50 +1738,9 @@ fn u64_to_u32(value: u64) -> u32 {
     value.min(u32::MAX as u64) as u32
 }
 
-/// Scans the rollout files (newest first) and returns the most recent `rate_limits`
-/// object that still has data (primary/secondary not null).
-fn latest_codex_rate_limits(sessions: &Path) -> Result<serde_json::Value> {
-    let mut files = collect_jsonl_files(sessions);
-    // Sort by modification time descending — the most recent file holds the newest snapshot.
-    files.sort_by_key(|entry| std::cmp::Reverse(entry.1));
-
-    // Limit the number of files read so a single refresh doesn't scan thousands of old sessions.
-    for (path, _) in files.into_iter().take(40) {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            if let Some(limits) = last_rate_limits_in(&text) {
-                return Ok(limits);
-            }
-        }
-    }
-    anyhow::bail!("no codex rate_limits found")
-}
-
-fn collect_jsonl_files(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime)> {
-    let mut out = Vec::new();
-    collect_jsonl_into(dir, &mut out);
-    out
-}
-
-fn collect_jsonl_into(dir: &Path, out: &mut Vec<(PathBuf, std::time::SystemTime)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_jsonl_into(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "jsonl") {
-            let modified = entry
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .unwrap_or(std::time::UNIX_EPOCH);
-            out.push((path, modified));
-        }
-    }
-}
-
 /// Gets the last `payload.rate_limits` (with primary or secondary not null)
 /// in a rollout file.
+#[cfg(test)]
 fn last_rate_limits_in(text: &str) -> Option<serde_json::Value> {
     let mut latest = None;
     for line in text.lines() {
@@ -1844,6 +1775,7 @@ fn last_rate_limits_in(text: &str) -> Option<serde_json::Value> {
     latest
 }
 
+#[cfg(test)]
 fn quota_from_codex_rate_limits(limits: &serde_json::Value) -> Result<QuotaInfo> {
     let mut five_hour = QuotaWindow {
         label: "5-hour limit".to_string(),
@@ -1973,9 +1905,7 @@ mod tests {
     #[test]
     fn claude_token_validity_uses_offline_expiry_with_skew() {
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let blob = |expires_at: i64| {
-            serde_json::json!({ "claudeAiOauth": { "accessToken": "x", "expiresAt": expires_at } })
-        };
+        let blob = |expires_at: i64| serde_json::json!({ "claudeAiOauth": { "accessToken": "x", "expiresAt": expires_at } });
         // Comfortably in the future → valid, no refresh needed.
         assert!(claude_token_still_valid(&blob(now_ms + 60 * 60 * 1000)));
         // Already expired → needs renewal.

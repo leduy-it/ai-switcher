@@ -128,7 +128,19 @@ export interface AppSnapshot {
   autoSwitchSettings: Record<string, AutoSwitchSetting>;
   toolSetups: Record<string, ToolSetup>;
   apiGateway: ApiGatewaySnapshot;
+  desktopSync?: DesktopSyncState;
+  desktops?: DesktopRuntime[];
+  selectedCodexHome?: string | null;
+  sharedCodexHome?: string;
 }
+
+export type DesktopApp = "codex" | "chatgpt";
+export interface DesktopSyncSettings { enabled: boolean; app: DesktopApp }
+export interface DesktopRuntime { app: DesktopApp; installed: boolean; running: boolean; pid: number | null; profileHome: string | null; sessionHome: string | null }
+export interface DesktopSessionView { threadId: string; name: string; cwd: string; phase: string; message: string }
+export interface DesktopOperationView { id: string; phase: string; message: string; targetAccountId: string; sessions: DesktopSessionView[]; updatedAt: string }
+export interface DesktopSyncState { settings: DesktopSyncSettings; lastAppliedAccountId: string | null; lastAppliedAt: string | null; error: string | null; confirmedEmail: string | null; confirmedPlan: string | null; confirmedAt: string | null; operation: DesktopOperationView | null }
+export interface SessionMigrationReport { profiles: number; catalogThreads: number; historyThreads: number; conflicts: number; pendingProjection: number; unavailableRollouts: number; backups: string[] }
 
 export type ApiGatewayServerState = "stopped" | "running" | "errored";
 export type ApiPoolAccountState = "available" | "exhausted" | "coolingDown" | "errored" | "excluded";
@@ -289,10 +301,11 @@ export interface AddAccountInput {
   launcher?: string;
 }
 
-export interface ImportCodexAccountInput {
+export interface CodexAuthSourceInput { authFilePath?: string; authJson?: string }
+export interface CodexAuthPreview { email: string | null; alreadyAdded: boolean; tokenFields: string[] }
+export interface ImportCodexAccountInput extends CodexAuthSourceInput {
   name: string;
   launcher: string;
-  authFilePath: string;
 }
 
 export interface AddApiAccountInput {

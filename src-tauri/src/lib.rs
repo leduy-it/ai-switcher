@@ -1,13 +1,18 @@
 mod api_gateway;
 mod app_state;
+mod codex_import;
 mod credential_export;
+mod desktop;
+mod desktop_recovery;
+mod desktop_rpc;
 mod detection;
-mod models;
 mod menubar;
+mod models;
 mod overlay;
-mod prime;
 mod pricing;
+mod prime;
 mod quota;
+mod session_migration;
 mod store;
 mod tools;
 mod tray;
@@ -44,6 +49,9 @@ async fn refresh_tool(app: tauri::AppHandle, tool_id: ToolId) -> Result<AppSnaps
     .await
     .map_err(|e| e.to_string())?;
     tray::rebuild(&app);
+    if let Ok(snapshot) = &result {
+        let _ = app.emit("snapshot-changed", snapshot);
+    }
     result
 }
 
@@ -62,6 +70,9 @@ async fn refresh_account(
     .await
     .map_err(|e| e.to_string())?;
     tray::rebuild(&app);
+    if let Ok(snapshot) = &result {
+        let _ = app.emit("snapshot-changed", snapshot);
+    }
     result
 }
 
@@ -94,6 +105,12 @@ async fn import_codex_account(
 }
 
 #[tauri::command]
+async fn parse_codex_auth(app: tauri::AppHandle, input: models::CodexAuthSourceInput) -> Result<models::CodexAuthPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<ManagedState>().parse_codex_auth(input).map_err(display_error))
+        .await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn add_api_account(
     app: tauri::AppHandle,
     state: State<'_, ManagedState>,
@@ -123,14 +140,99 @@ fn rename_account(
 }
 
 #[tauri::command]
-fn switch_account(
+async fn switch_account(
     app: tauri::AppHandle,
-    state: State<'_, ManagedState>,
     input: SwitchAccountInput,
 ) -> Result<AppSnapshot, String> {
-    let snapshot = state.switch_account(input).map_err(display_error)?;
+    let handle = app.clone();
+    let snapshot = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .state::<ManagedState>()
+            .switch_account(input)
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     tray::rebuild(&app);
+    let _ = app.emit("snapshot-changed", &snapshot);
+    let _ = app.emit("usage-changed", ());
     Ok(snapshot)
+}
+
+#[tauri::command]
+fn set_desktop_sync(
+    app: tauri::AppHandle,
+    state: State<'_, ManagedState>,
+    settings: models::DesktopSyncSettings,
+) -> Result<AppSnapshot, String> {
+    let snapshot = state.set_desktop_sync(settings).map_err(display_error)?;
+    let _ = app.emit("snapshot-changed", &snapshot);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+async fn apply_codex_desktop(
+    app: tauri::AppHandle,
+    desktop_app: models::DesktopApp,
+) -> Result<AppSnapshot, String> {
+    let handle = app.clone();
+    let snapshot = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .state::<ManagedState>()
+            .apply_codex_desktop(desktop_app)
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    tray::rebuild(&app);
+    let _ = app.emit("snapshot-changed", &snapshot);
+    let _ = app.emit("usage-changed", ());
+    Ok(snapshot)
+}
+
+#[tauri::command]
+async fn desktop_switch_action(
+    app: tauri::AppHandle,
+    action: String,
+) -> Result<AppSnapshot, String> {
+    let handle = app.clone();
+    let snapshot = tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<ManagedState>();
+        desktop_recovery::action(&state, &action).map_err(display_error)?;
+        state.snapshot().map_err(display_error)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.emit("snapshot-changed", &snapshot);
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn open_desktop_thread(state: State<'_, ManagedState>, thread_id: String) -> Result<(), String> {
+    let desktop = state
+        .data
+        .lock()
+        .map_err(|_| "state lock poisoned")?
+        .desktop_sync
+        .settings
+        .app
+        .clone();
+    desktop::open_thread(&desktop, &thread_id).map_err(display_error)
+}
+
+#[tauri::command]
+async fn repair_codex_sessions(app: tauri::AppHandle) -> Result<session_migration::Report, String> {
+    let handle = app.clone();
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .state::<ManagedState>()
+            .repair_codex_sessions()
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.emit("usage-changed", ());
+    Ok(report)
 }
 
 #[tauri::command]
@@ -411,9 +513,7 @@ fn set_api_gateway_account(
 }
 
 #[tauri::command]
-async fn refresh_api_gateway_models(
-    app: tauri::AppHandle,
-) -> Result<AppSnapshot, String> {
+async fn refresh_api_gateway_models(app: tauri::AppHandle) -> Result<AppSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<ManagedState>()
             .refresh_api_gateway_models()
@@ -457,21 +557,37 @@ fn open_main_window(app: tauri::AppHandle, fullscreen: bool) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn get_auto_prime_settings(state: State<'_, ManagedState>) -> Result<models::AutoPrimeSettings, String> {
+fn get_auto_prime_settings(
+    state: State<'_, ManagedState>,
+) -> Result<models::AutoPrimeSettings, String> {
     state.auto_prime_settings().map_err(display_error)
 }
 
 #[tauri::command]
-fn set_auto_prime_settings(app: tauri::AppHandle, state: State<'_, ManagedState>, input: models::AutoPrimeSettings) -> Result<models::AutoPrimeSettings, String> {
-    let settings = state.set_auto_prime_settings(input).map_err(display_error)?;
+fn set_auto_prime_settings(
+    app: tauri::AppHandle,
+    state: State<'_, ManagedState>,
+    input: models::AutoPrimeSettings,
+) -> Result<models::AutoPrimeSettings, String> {
+    let settings = state
+        .set_auto_prime_settings(input)
+        .map_err(display_error)?;
     let _ = app.emit("auto-prime-changed", &settings);
     Ok(settings)
 }
 
 #[tauri::command]
-async fn export_credentials(app: tauri::AppHandle, input: models::CredentialsExportInput) -> Result<models::CredentialsExportResult, String> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<ManagedState>().export_credentials(input).map_err(display_error))
-        .await.map_err(|error| error.to_string())?
+async fn export_credentials(
+    app: tauri::AppHandle,
+    input: models::CredentialsExportInput,
+) -> Result<models::CredentialsExportResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<ManagedState>()
+            .export_credentials(input)
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -554,10 +670,16 @@ pub fn run() {
             refresh_account,
             add_account,
             import_codex_account,
+            parse_codex_auth,
             add_api_account,
             fetch_gateway_models,
             rename_account,
             switch_account,
+            set_desktop_sync,
+            apply_codex_desktop,
+            desktop_switch_action,
+            open_desktop_thread,
+            repair_codex_sessions,
             set_launcher,
             set_account_hidden,
             set_weekly_lock,
@@ -638,6 +760,16 @@ pub fn run() {
             });
 
             // App-local automation: no launch daemon, wake schedule, CLI, or token refresh.
+            let desktop_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut seen = std::collections::BTreeMap::new();
+                loop {
+                    desktop_handle
+                        .state::<ManagedState>()
+                        .watch_codex_changes(&mut seen, &desktop_handle);
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                }
+            });
             let prime_handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(60));
@@ -674,7 +806,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             if window.label() == menubar::LABEL {
                 match event {
-                    tauri::WindowEvent::Focused(false) => menubar::dismiss_on_blur(window.app_handle()),
+                    tauri::WindowEvent::Focused(false) => {
+                        menubar::dismiss_on_blur(window.app_handle())
+                    }
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
                         menubar::hide(window.app_handle());

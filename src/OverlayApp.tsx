@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ArrowUpRight, Check, ChevronDown, Loader2, Minus, RefreshCw, Settings2, X } from "lucide-react";
 import michaelLogo from "./assets/logo-michael.svg";
 import { api } from "./tauri";
+import { confirmedDesktopEmail, phaseName } from "./DesktopStatus";
 import { applyProfileTheme, type ProfileTheme } from "./theme";
 import type { Account, AppSnapshot, OverlaySettings, QuotaInfo, QuotaWindow, ToolId } from "./types";
 import "./overlay.css";
@@ -252,6 +253,12 @@ export function OverlayApp() {
           <X size={12} />
         </button>
       </header>
+
+      {snapshot?.desktopSync && <button className="ovDesktopStatus" onClick={() => void api.openMainWindow(false)} title="Open desktop account and recovery details">
+        {snapshot.desktopSync.operation && !["applied", "cancelled"].includes(snapshot.desktopSync.operation.phase)
+          ? `Desktop: ${phaseName(snapshot.desktopSync.operation.phase)} · ${snapshot.desktopSync.operation.sessions.length} sessions`
+          : confirmedDesktopEmail(snapshot) ? `Desktop: ${confirmedDesktopEmail(snapshot)}` : "Desktop account unconfirmed"}
+      </button>}
 
       {showSettings ? (
         <OverlaySettingsPanel

@@ -3864,3 +3864,13 @@ textarea {
 .autoPrimeAccount details { margin: 8px 0 0 23px; font-size: 10px; color: var(--text-2); }
 .autoPrimeAccount summary { cursor: pointer; color: var(--accent-bright); }
 .autoPrimeAccount details p { margin: 6px 0; }
+.authSourceToggle { margin-top: 8px; }
+.modal .authJsonBox { width: 100%; min-height: 150px; max-height: 260px; resize: vertical; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2; }
+.modal .authJsonBox:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+.authJsonActions { display: flex; align-items: center; gap: 10px; }
+.authJsonActions .fetchModels { flex: 1; }
+.authJsonPreview { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); overflow-wrap: anywhere; }
+.authJsonPreview strong { color: var(--accent); font-size: 13px; }
+.authJsonPreview span { font-size: 12px; }
+.authJsonPreview small { color: var(--text-3); font-size: 10px; line-height: 1.5; }
+.authJsonPreview.duplicate { border-color: var(--amber); }

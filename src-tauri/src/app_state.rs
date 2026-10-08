@@ -49,6 +49,7 @@ pub struct ManagedState {
     pub api_server: Mutex<crate::api_gateway::ApiServerHandle>,
     /// Serializes usage scans so repeated tab opens cannot race while rebuilding the same cache.
     pub usage_scan: Mutex<()>,
+    pub account_switch: Mutex<()>,
     /// True while a "Prime ngay" attempt is running, so a second button press can't start an
     /// overlapping attempt (send + confirm can block for ~2 minutes). An `Arc` so the backgrounded
     /// worker can move a clear-on-drop guard into its thread without a raw pointer (see
@@ -70,6 +71,7 @@ impl ManagedState {
             data: Mutex::new(data),
             api_server: Mutex::new(server),
             usage_scan: Mutex::new(()),
+            account_switch: Mutex::new(()),
             priming: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         // Clean up orphan active files: pointing to a deleted profile → clear + reinstall the hook.
@@ -77,6 +79,7 @@ impl ManagedState {
         // The API server never auto-starts. Recover from a crash/forced quit that may have left
         // the bare CLI command pointing at a virtual account whose endpoint is now offline.
         let _ = managed.deactivate_virtual_api_accounts();
+        crate::desktop_recovery::recover_after_restart(&managed);
         Ok(managed)
     }
 
@@ -90,7 +93,12 @@ impl ManagedState {
             Err(_) => return,
         };
         let mut changed = false;
-        for tool_id in [ToolId::Claude, ToolId::Codex, ToolId::Cursor, ToolId::Opencode] {
+        for tool_id in [
+            ToolId::Claude,
+            ToolId::Codex,
+            ToolId::Cursor,
+            ToolId::Opencode,
+        ] {
             let valid_dirs: Vec<std::path::PathBuf> = data
                 .accounts
                 .iter()
@@ -895,9 +903,10 @@ impl ManagedState {
                         && !is_virtual_api_account(account)
                 })
                 .filter(|account| {
-                    let unregistered = !data.claude_orgs.values().any(|record| {
-                        record.account_ids.iter().any(|id| id == &account.id)
-                    });
+                    let unregistered = !data
+                        .claude_orgs
+                        .values()
+                        .any(|record| record.account_ids.iter().any(|id| id == &account.id));
                     let stale = last_ok
                         .get(&account.id)
                         .is_none_or(|instant| instant.elapsed() >= CLAUDE_ORG_RECHECK);
@@ -1517,8 +1526,14 @@ impl ManagedState {
         Ok(self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?.auto_prime.clone())
     }
 
-    pub fn set_auto_prime_settings(&self, mut next: crate::models::AutoPrimeSettings) -> Result<crate::models::AutoPrimeSettings> {
-        let mut data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+    pub fn set_auto_prime_settings(
+        &self,
+        mut next: crate::models::AutoPrimeSettings,
+    ) -> Result<crate::models::AutoPrimeSettings> {
+        let mut data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
         let mut seen = std::collections::HashSet::new();
         next.accounts.retain(|key| seen.insert(key.clone()));
         next.records = data.auto_prime.records.clone();
@@ -1539,23 +1554,68 @@ impl ManagedState {
             let Ok(mut data) = self.data.lock() else { return; };
             if !data.auto_prime.enabled { return; }
             let mut identities = std::collections::HashSet::new();
-            let candidate = snapshot.tools.iter().flat_map(|tool| tool.accounts.iter()).find(|account| {
-                let key = format!("{}:{}", account.tool_id.as_str(), account.id);
-                if account.hidden || account.is_locked() || account.state == AccountState::NeedsLogin
-                    || !crate::prime::is_prime_eligible(&account.tool_id, account.api_provider.is_some())
-                    || (!data.auto_prime.accounts.is_empty() && !data.auto_prime.accounts.contains(&key)) { return false; }
-                let identity = format!("{}:{}", account.tool_id.as_str(), account.account_email.as_deref().unwrap_or(&account.fingerprint).to_lowercase());
-                if !identities.insert(identity) { return false; }
-                let Some(quota) = &account.quota else { return false; };
-                let hello_only = account.tool_id == ToolId::Codex && crate::prime::supports_hello_only(quota);
-                if quota.error.is_some() || (quota.prime_available != Some(true) && !hello_only) || quota.weekly.percent_used.is_some_and(|used| used >= 100.0) { return false; }
-                let fresh = quota.updated_at.as_deref().and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-                    .is_some_and(|stamp| now.signed_duration_since(stamp).num_minutes() < 10);
-                if !fresh { return false; }
-                !data.auto_prime.records.get(&key).and_then(|record| chrono::DateTime::parse_from_rfc3339(&record.next_attempt_at).ok())
-                    .is_some_and(|next| next > now)
-            }).cloned();
-            let Some(account) = candidate else { return; };
+            let candidate = snapshot
+                .tools
+                .iter()
+                .flat_map(|tool| tool.accounts.iter())
+                .find(|account| {
+                    let key = format!("{}:{}", account.tool_id.as_str(), account.id);
+                    if account.hidden
+                        || account.is_locked()
+                        || account.state == AccountState::NeedsLogin
+                        || !crate::prime::is_prime_eligible(
+                            &account.tool_id,
+                            account.api_provider.is_some(),
+                        )
+                        || (!data.auto_prime.accounts.is_empty()
+                            && !data.auto_prime.accounts.contains(&key))
+                    {
+                        return false;
+                    }
+                    let identity = format!(
+                        "{}:{}",
+                        account.tool_id.as_str(),
+                        account
+                            .account_email
+                            .as_deref()
+                            .unwrap_or(&account.fingerprint)
+                            .to_lowercase()
+                    );
+                    if !identities.insert(identity) {
+                        return false;
+                    }
+                    let Some(quota) = &account.quota else {
+                        return false;
+                    };
+                    let hello_only = account.tool_id == ToolId::Codex
+                        && crate::prime::supports_hello_only(quota);
+                    if quota.error.is_some()
+                        || (quota.prime_available != Some(true) && !hello_only)
+                        || quota.weekly.percent_used.is_some_and(|used| used >= 100.0)
+                    {
+                        return false;
+                    }
+                    let fresh = quota
+                        .updated_at
+                        .as_deref()
+                        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                        .is_some_and(|stamp| now.signed_duration_since(stamp).num_minutes() < 10);
+                    if !fresh {
+                        return false;
+                    }
+                    !data
+                        .auto_prime
+                        .records
+                        .get(&key)
+                        .and_then(|record| {
+                            chrono::DateTime::parse_from_rfc3339(&record.next_attempt_at).ok()
+                        })
+                        .is_some_and(|next| next > now)
+                })
+                .cloned();
+            let Some(account) = candidate else {
+                return;
+            };
             let default_dir = resolved_default_config_dir(&data, &account.tool_id);
             let job = PrimeJob {
                 config_dir: account_config_dir_with_default(&self.store, &account, &default_dir),
@@ -1564,11 +1624,18 @@ impl ManagedState {
             let key = format!("{}:{}", job.tool_id.as_str(), job.account_id);
             // Persist BEFORE sending. An unconfirmed send or interrupted process gets a full 5h
             // cooldown rather than potentially consuming quota with repeated greetings.
-            data.auto_prime.records.insert(key, crate::models::AutoPrimeRecord {
-                attempted_at: now.to_rfc3339(), next_attempt_at: (now + chrono::Duration::hours(5)).to_rfc3339(),
-                kind: "pending".into(), message: "Sending one Hello to open the 5-hour window".into(),
-            });
-            if self.store.save(&data).is_err() { return; }
+            data.auto_prime.records.insert(
+                key,
+                crate::models::AutoPrimeRecord {
+                    attempted_at: now.to_rfc3339(),
+                    next_attempt_at: (now + chrono::Duration::hours(5)).to_rfc3339(),
+                    kind: "pending".into(),
+                    message: "Sending one Hello to open the 5-hour window".into(),
+                },
+            );
+            if self.store.save(&data).is_err() {
+                return;
+            }
             job
         };
         self.append_prime_log(&format!("[AUTO PRIME] {} · {} — one Hello; existing token only", job.tool_id.as_str(), job.account_name));
@@ -1588,10 +1655,26 @@ impl ManagedState {
     }
 
     /// Raw secrets are collected and saved in Rust; only the file path/counts return to the UI.
-    pub fn export_credentials(&self, input: crate::models::CredentialsExportInput) -> Result<crate::models::CredentialsExportResult> {
-        let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?.clone();
-        let profiles = data.accounts.iter().filter(|account| input.tool_id.as_ref().is_none_or(|tool| tool == &account.tool_id)
-            && (input.include_hidden || !account.hidden)).map(|account| {
+    pub fn export_credentials(
+        &self,
+        input: crate::models::CredentialsExportInput,
+    ) -> Result<crate::models::CredentialsExportResult> {
+        let data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .clone();
+        let profiles = data
+            .accounts
+            .iter()
+            .filter(|account| {
+                input
+                    .tool_id
+                    .as_ref()
+                    .is_none_or(|tool| tool == &account.tool_id)
+                    && (input.include_hidden || !account.hidden)
+            })
+            .map(|account| {
                 let default_dir = resolved_default_config_dir(&data, &account.tool_id);
                 let mut account = account.clone();
                 let dir = if account.tool_id == ToolId::Antigravity { self.store.account_dir(&account.tool_id, &account.id) }
@@ -1609,7 +1692,12 @@ impl ManagedState {
     /// Blocking core of a manual prime: send one lightweight request, confirm, log the outcome and
     /// refresh the account's quota on success. Split out so `prime_now` can run it on a background
     /// thread (GUI) or inline (tests). The caller holds the overlap guard for the duration.
-    fn run_prime(&self, job: &PrimeJob, app: Option<&AppHandle>, automatic: bool) -> crate::models::PrimeNowResult {
+    fn run_prime(
+        &self,
+        job: &PrimeJob,
+        app: Option<&AppHandle>,
+        automatic: bool,
+    ) -> crate::models::PrimeNowResult {
         use crate::prime::PrimeOutcome;
 
         let trace_prefix = format!(
@@ -1620,9 +1708,19 @@ impl ManagedState {
         );
         let trace = |line: &str| self.append_prime_log(&format!("{trace_prefix} {line}"));
         let outcome = if automatic {
-            crate::prime::automatic_prime_account_traced(&job.tool_id, &job.config_dir, std::thread::sleep, trace)
+            crate::prime::automatic_prime_account_traced(
+                &job.tool_id,
+                &job.config_dir,
+                std::thread::sleep,
+                trace,
+            )
         } else {
-            crate::prime::prime_account_traced(&job.tool_id, &job.config_dir, std::thread::sleep, trace)
+            crate::prime::prime_account_traced(
+                &job.tool_id,
+                &job.config_dir,
+                std::thread::sleep,
+                trace,
+            )
         };
 
         // On success, refresh the displayed quota right away so the card shows the new reset.
@@ -1688,6 +1786,9 @@ impl ManagedState {
         threshold: f64,
         app: Option<&AppHandle>,
     ) -> Result<()> {
+        let Ok(_switch_guard) = self.account_switch.try_lock() else {
+            return Ok(());
+        };
         if !matches!(tool_id, ToolId::Claude | ToolId::Codex) {
             return Ok(());
         }
@@ -1824,6 +1925,19 @@ impl ManagedState {
         self.create_profile_account(app, input)
     }
 
+    pub fn parse_codex_auth(&self, input: crate::models::CodexAuthSourceInput) -> Result<crate::models::CodexAuthPreview> {
+        let (_, auth) = crate::codex_import::load(&input)?;
+        let email = crate::quota::codex_account_email_from_auth(&auth);
+        let account_id = crate::quota::codex_account_id_from_auth(&auth);
+        let user_id = crate::quota::codex_user_id_from_auth(&auth);
+        let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let default_dir = resolved_default_config_dir(&data, &ToolId::Codex);
+        let already_added = codex_identity_exists(&self.store, &data, &default_dir, account_id.as_deref(), user_id.as_deref(), email.as_deref());
+        let token_fields = ["access_token", "refresh_token", "id_token", "account_id"].into_iter()
+            .filter(|key| auth["tokens"][*key].as_str().is_some_and(|s| !s.is_empty())).map(str::to_string).collect();
+        Ok(crate::models::CodexAuthPreview { email, already_added, token_fields })
+    }
+
     /// Import an existing Codex OAuth auth.json into a new isolated Switcher profile.
     /// The source is only read; the copied credential is stored with owner-only permissions.
     pub fn import_codex_account(&self, input: ImportCodexAccountInput) -> Result<AppSnapshot> {
@@ -1831,30 +1945,7 @@ impl ManagedState {
         if raw_launcher.is_empty() {
             anyhow::bail!("A custom command is required (e.g. codex-work)");
         }
-        let metadata = std::fs::metadata(&input.auth_file_path)
-            .context("Couldn't read the selected auth.json file")?;
-        if !metadata.is_file() {
-            anyhow::bail!("Select a Codex auth.json file");
-        }
-        if metadata.len() > 1024 * 1024 {
-            anyhow::bail!("The selected auth.json file is larger than expected");
-        }
-        let raw_auth = std::fs::read_to_string(&input.auth_file_path)
-            .context("Couldn't read the selected auth.json file")?;
-        let auth: serde_json::Value = serde_json::from_str(&raw_auth)
-            .context("The selected file is not valid Codex auth.json JSON")?;
-        let tokens = auth
-            .get("tokens")
-            .context("The selected file doesn't contain Codex OAuth tokens")?;
-        for key in ["access_token", "refresh_token"] {
-            if !tokens
-                .get(key)
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|token| !token.trim().is_empty())
-            {
-                anyhow::bail!("The selected file is missing a Codex OAuth {key}");
-            }
-        }
+        let (raw_auth, auth) = crate::codex_import::load(&input.source)?;
         let account_id = crate::quota::codex_account_id_from_auth(&auth);
         let user_id = crate::quota::codex_user_id_from_auth(&auth);
         let email = crate::quota::codex_account_email_from_auth(&auth);
@@ -1890,13 +1981,9 @@ impl ManagedState {
             let _ = delete_account_files(&ToolId::Codex, &self.store, &id);
             return Err(error).context("Couldn't copy Codex credentials into the new profile");
         }
-        if let Err(error) = write_launcher(
-            &ToolId::Codex,
-            &self.store,
-            &id,
-            &launcher,
-            &binary_path,
-        ) {
+        if let Err(error) =
+            write_launcher(&ToolId::Codex, &self.store, &id, &launcher, &binary_path)
+        {
             let _ = delete_account_files(&ToolId::Codex, &self.store, &id);
             return Err(error).context("Couldn't create the account's custom command");
         }
@@ -2664,6 +2751,10 @@ impl ManagedState {
     /// Switch = pick the account for the PLAIN `claude`/`codex` command (via shell hook +
     /// active file, WITHOUT wrapping the binary). Antigravity still copy-swaps credentials.
     pub fn switch_account(&self, input: SwitchAccountInput) -> Result<AppSnapshot> {
+        let _switch_guard = self
+            .account_switch
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Account switch already failed"))?;
         let (is_default, state) = {
             let data = self
                 .data
@@ -2732,7 +2823,376 @@ impl ManagedState {
             self.store.save(&data)?;
         }
 
+        // Refresh the selected identity immediately. Do not wait for the periodic poll or use a
+        // shared rollout log as quota. None suppresses background desktop restarts/notifications.
+        let _ = self.refresh_single_account(&input.tool_id, &input.account_id, None);
+        if input.tool_id == ToolId::Codex {
+            let settings = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+                .desktop_sync
+                .settings
+                .clone();
+            if settings.enabled {
+                if let Err(error) = self.apply_desktop_inner(settings) {
+                    let mut data = self
+                        .data
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+                    data.desktop_sync.error = Some(format!(
+                        "CLI selected; desktop handoff could not be queued: {error:#}"
+                    ));
+                    self.store.save(&data)?;
+                }
+            }
+        }
         self.snapshot()
+    }
+
+    pub fn set_desktop_sync(
+        &self,
+        settings: crate::models::DesktopSyncSettings,
+    ) -> Result<AppSnapshot> {
+        let mut data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        data.desktop_sync.settings = settings;
+        self.store.save(&data)?;
+        drop(data);
+        self.snapshot()
+    }
+
+    pub fn apply_codex_desktop(&self, app: crate::models::DesktopApp) -> Result<AppSnapshot> {
+        let _guard = self
+            .account_switch
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let mut settings = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .desktop_sync
+            .settings
+            .clone();
+        settings.app = app;
+        self.apply_desktop_inner(settings)?;
+        self.snapshot()
+    }
+
+    fn apply_desktop_inner(&self, settings: crate::models::DesktopSyncSettings) -> Result<()> {
+        crate::desktop_recovery::request(self, settings)
+    }
+
+    fn migrate_codex_catalogs(&self) -> Result<crate::session_migration::Report> {
+        let (shared, profiles) = {
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let shared = resolved_default_config_dir(&data, &ToolId::Codex);
+            let profiles: std::collections::BTreeSet<_> = data
+                .accounts
+                .iter()
+                .filter(|a| a.tool_id == ToolId::Codex && a.api_provider.is_none())
+                .map(|a| account_config_dir_with_default(&self.store, a, &shared))
+                .collect();
+            (shared, profiles)
+        };
+        let mut result = crate::session_migration::Report::default();
+        for profile in profiles {
+            if profile == shared || !profile.join("state_5.sqlite").exists() {
+                continue;
+            }
+            // Use each dormant catalog's own SQLite snapshot. Leave a live source alone until its
+            // current work finishes; repair never interrupts it or changes its authentication.
+            if profile
+                .join("app-server-control/app-server-control.sock")
+                .exists()
+            {
+                let mut client = crate::desktop_rpc::Client::connect(&profile).context("A profile backend could not be inspected; finish its work and retry catalog repair")?;
+                anyhow::ensure!(
+                    !client
+                        .threads()?
+                        .iter()
+                        .any(|t| t["status"]["type"] == "active"),
+                    "A source profile is busy. Finish its work before repairing session catalogs"
+                );
+            }
+            link_shared_sessions_to(&ToolId::Codex, &profile, &shared);
+            result.include(crate::session_migration::migrate(&profile, &shared)?);
+        }
+        Ok(result)
+    }
+
+    pub fn repair_codex_sessions(&self) -> Result<crate::session_migration::Report> {
+        let _guard = self
+            .account_switch
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        self.migrate_codex_catalogs()
+    }
+
+    pub(crate) fn desktop_selected_target(
+        &self,
+    ) -> Result<(Account, std::path::PathBuf, std::path::PathBuf)> {
+        {
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let id = active_account_id_for(&self.store, &ToolId::Codex, &data.accounts)
+                .context("Select a Codex account first")?;
+            let account = data
+                .accounts
+                .iter()
+                .find(|a| a.tool_id == ToolId::Codex && a.id == id)
+                .context("Selected account no longer exists")?
+                .clone();
+            let shared = resolved_default_config_dir(&data, &ToolId::Codex);
+            let profile = account_config_dir_with_default(&self.store, &account, &shared);
+            Ok((account, profile, shared))
+        }
+    }
+
+    pub(crate) fn perform_desktop_handoff(
+        &self,
+        settings: crate::models::DesktopSyncSettings,
+        expected_id: &str,
+    ) -> Result<()> {
+        let (account, profile, shared) = self.desktop_selected_target()?;
+        anyhow::ensure!(
+            account.id == expected_id,
+            "Account selection changed during desktop handoff"
+        );
+        let result = if account.hidden
+            || account.is_locked()
+            || account.state == AccountState::NeedsLogin
+        {
+            Err(anyhow::anyhow!(
+                "The selected desktop account is hidden, locked or needs login"
+            ))
+        } else if account.api_provider.is_some() {
+            Err(anyhow::anyhow!("Desktop handoff supports subscription profiles; use this API profile's CLI launcher"))
+        } else if !crate::tools::profile_has_credentials(&ToolId::Codex, &profile) {
+            Err(anyhow::anyhow!(
+                "The selected desktop account has no credentials"
+            ))
+        } else {
+            (|| -> Result<()> {
+                link_shared_sessions_to(&ToolId::Codex, &profile, &shared);
+                link_shared_config_to(&ToolId::Codex, &profile, &shared);
+                crate::desktop::validate_catalog_config(&profile, &shared)?;
+                let migration = self.migrate_codex_catalogs()?;
+                anyhow::ensure!(migration.conflicts == 0, "{} sessions have partially different paginated histories. Private backups and original profiles were preserved; reconcile those histories before switching", migration.conflicts);
+                let already_running = crate::desktop::runtime().iter().any(|r| {
+                    r.app == settings.app
+                        && r.running
+                        && r.profile_home.as_deref() == Some(profile.as_path())
+                        && r.session_home.as_deref() == Some(shared.as_path())
+                });
+                if already_running && self.verify_desktop_identity(&profile, &account.id).is_ok() {
+                    Ok(())
+                } else {
+                    crate::desktop::apply(&settings, &profile, &shared, false)
+                        .and_then(|_| self.verify_desktop_identity(&profile, &account.id))
+                }
+            })()
+        };
+        {
+            let mut data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            data.desktop_sync.settings = settings;
+            data.desktop_sync.error = result.as_ref().err().map(|e| format!("{e:#}"));
+            if result.is_ok() {
+                data.desktop_sync.last_applied_account_id = Some(account.id.clone());
+                data.desktop_sync.last_applied_at = Some(now());
+            }
+            self.store.save(&data)?;
+        }
+        // Return both CLI and desktop status even when desktop handoff failed. UI must show the
+        // stored error instead of claiming that selecting the CLI switched the desktop too.
+        let _ = self.refresh_single_account(&ToolId::Codex, &account.id, None);
+        result
+    }
+
+    pub(crate) fn verify_desktop_identity(
+        &self,
+        profile: &std::path::Path,
+        account_id: &str,
+    ) -> Result<()> {
+        let runtime = crate::desktop::runtime();
+        anyhow::ensure!(
+            runtime
+                .iter()
+                .any(|r| r.running && r.profile_home.as_deref() == Some(profile)),
+            "Desktop execution profile has not been confirmed"
+        );
+        let (_, selected, shared) = self.desktop_selected_target()?;
+        anyhow::ensure!(
+            selected == profile,
+            "CLI selection changed before desktop confirmation"
+        );
+        crate::desktop::validate_catalog_config(profile, &shared)?;
+        let expected = crate::quota::codex_account_email(profile)
+            .context("Profile has no email to verify desktop identity")?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut client = loop {
+            match crate::desktop_rpc::Client::connect(profile) {
+                Ok(client) => break client,
+                Err(error) if std::time::Instant::now() >= deadline => return Err(error),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(400)),
+            }
+        };
+        let response = client.request("account/read", serde_json::json!({"refreshToken":false}))?;
+        anyhow::ensure!(crate::desktop::backend_catalog_home(profile).as_deref() == Some(shared.as_path()), "The running desktop backend's shared catalog has not been confirmed; apply again after its work finishes");
+        let actual = response["account"]["email"]
+            .as_str()
+            .context("Desktop backend did not report an account email")?;
+        anyhow::ensure!(
+            actual.eq_ignore_ascii_case(&expected),
+            "Desktop backend identity differs from the selected profile; handoff is not confirmed"
+        );
+        if let Some(actual_id) = response["workspaceRouting"]["chatgptAccountId"].as_str() {
+            let expected_id = crate::quota::codex_account_id(profile)
+                .context("Selected profile has no workspace identity")?;
+            anyhow::ensure!(
+                actual_id == expected_id,
+                "Desktop workspace differs from the selected profile; handoff is not confirmed"
+            );
+        }
+        let mut data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        data.desktop_sync.confirmed_email = Some(actual.to_string());
+        data.desktop_sync.confirmed_plan =
+            response["account"]["planType"].as_str().map(str::to_string);
+        data.desktop_sync.confirmed_at = Some(now());
+        data.desktop_sync.last_applied_account_id = Some(account_id.to_string());
+        self.store.save(&data)?;
+        Ok(())
+    }
+
+    /// Read-only fingerprints never leave Rust. Detect credential changes from either desktop
+    /// or CLI and immediately refresh the corresponding quota/email in every Switcher window.
+    pub fn watch_codex_changes(
+        &self,
+        seen: &mut std::collections::BTreeMap<String, String>,
+        app: &AppHandle,
+    ) {
+        use sha2::{Digest, Sha256};
+        let targets: Vec<_> = {
+            let Ok(data) = self.data.lock() else {
+                return;
+            };
+            let shared = resolved_default_config_dir(&data, &ToolId::Codex);
+            data.accounts
+                .iter()
+                .filter(|a| a.tool_id == ToolId::Codex && !a.hidden && a.api_provider.is_none())
+                .map(|a| {
+                    (
+                        a.id.clone(),
+                        account_config_dir_with_default(&self.store, a, &shared),
+                    )
+                })
+                .collect()
+        };
+        let mut changed = Vec::new();
+        for (id, path) in &targets {
+            let digest = std::fs::read(path.join("auth.json"))
+                .map(|bytes| format!("{:x}", Sha256::digest(bytes)))
+                .unwrap_or_default();
+            if seen
+                .insert(id.clone(), digest.clone())
+                .is_some_and(|old| old != digest)
+            {
+                changed.push(id.clone());
+            }
+        }
+        let selected_key = std::fs::read_to_string(self.store.active_profile_path(&ToolId::Codex))
+            .unwrap_or_default();
+        let selected_changed = seen
+            .insert("cli-active-profile".into(), selected_key.clone())
+            .is_some_and(|old| old != selected_key);
+        let runtime_key = format!("{:?}", crate::desktop::runtime());
+        let runtime_changed = seen
+            .insert("desktop-runtime".into(), runtime_key.clone())
+            .is_some_and(|old| old != runtime_key);
+        for id in &changed {
+            let _ = self.refresh_single_account(&ToolId::Codex, id, None);
+        }
+        if runtime_changed || selected_changed {
+            if let Ok((account, _, _)) = self.desktop_selected_target() {
+                if !changed.contains(&account.id) {
+                    let _ = self.refresh_single_account(&ToolId::Codex, &account.id, None);
+                }
+            }
+        }
+        let selected_target = self.desktop_selected_target().ok();
+        let mut desktop_mismatch = selected_target.as_ref().is_some_and(|(a, home, _)| {
+            changed.contains(&a.id)
+                && crate::desktop::runtime().iter().any(|r| r.running)
+                && !crate::desktop::runtime()
+                    .iter()
+                    .any(|r| r.running && r.profile_home.as_deref() == Some(home.as_path()))
+        });
+        for (id, home) in &targets {
+            if changed.contains(id)
+                && crate::desktop::runtime()
+                    .iter()
+                    .any(|r| r.running && r.profile_home.as_deref() == Some(home.as_path()))
+            {
+                if let Err(error) = self.verify_desktop_identity(home, id) {
+                    if selected_target
+                        .as_ref()
+                        .is_some_and(|(a, _, _)| a.id == *id)
+                    {
+                        desktop_mismatch = true;
+                    }
+                    if let Ok(mut data) = self.data.lock() {
+                        data.desktop_sync.confirmed_at = None;
+                        data.desktop_sync.confirmed_email = None;
+                        data.desktop_sync.error = Some(format!(
+                            "Desktop credential change could not be confirmed: {error:#}"
+                        ));
+                        let _ = self.store.save(&data);
+                    }
+                }
+            }
+        }
+        if selected_changed || desktop_mismatch {
+            if let Ok(_guard) = self.account_switch.lock() {
+                let settings = self.data.lock().ok().and_then(|data| {
+                    let pending =
+                        data.desktop_sync.operation.as_ref().is_some_and(|op| {
+                            !["applied", "cancelled"].contains(&op.phase.as_str())
+                        });
+                    (data.desktop_sync.settings.enabled && !pending)
+                        .then(|| data.desktop_sync.settings.clone())
+                });
+                if let Some(settings) = settings {
+                    if let Err(error) = self.apply_desktop_inner(settings) {
+                        if let Ok(mut data) = self.data.lock() {
+                            data.desktop_sync.error =
+                                Some(format!("Desktop reload could not be queued: {error:#}"));
+                            let _ = self.store.save(&data);
+                        }
+                    }
+                }
+            }
+        }
+        if !changed.is_empty() || runtime_changed || selected_changed {
+            if let Ok(snapshot) = self.snapshot() {
+                let _ = app.emit("snapshot-changed", snapshot);
+            }
+            let _ = app.emit("usage-changed", ());
+            crate::tray::rebuild(app);
+        }
+        crate::desktop_recovery::tick(self, app);
     }
 
     pub fn delete_account(&self, tool_id: ToolId, account_id: String) -> Result<AppSnapshot> {
@@ -2762,9 +3222,10 @@ impl ManagedState {
             let pending_org_lookup = if tool_id == ToolId::Claude
                 && account.api_provider.is_none()
                 && !is_virtual_api_account(account)
-                && !data.claude_orgs.values().any(|record| {
-                    record.account_ids.iter().any(|id| id == &account.id)
-                })
+                && !data
+                    .claude_orgs
+                    .values()
+                    .any(|record| record.account_ids.iter().any(|id| id == &account.id))
             {
                 let default_dir = resolved_default_config_dir(&data, &tool_id);
                 Some((
@@ -2774,7 +3235,11 @@ impl ManagedState {
             } else {
                 None
             };
-            (account.launcher_command.clone(), was_active, pending_org_lookup)
+            (
+                account.launcher_command.clone(),
+                was_active,
+                pending_org_lookup,
+            )
         };
 
         // Refuse if this account's folder is the tool's configured default config dir — other
@@ -2812,7 +3277,13 @@ impl ManagedState {
         if let Some((name, config_dir)) = pending_org_lookup {
             if let Ok(identity) = read_claude_profile(&config_dir) {
                 if let Ok(mut data) = self.data.lock() {
-                    if upsert_claude_org(&mut data.claude_orgs, &identity, &account_id, &name, &now()) {
+                    if upsert_claude_org(
+                        &mut data.claude_orgs,
+                        &identity,
+                        &account_id,
+                        &name,
+                        &now(),
+                    ) {
                         let _ = self.store.save(&data);
                     }
                 }
@@ -2941,13 +3412,10 @@ fn codex_identity_exists(
                 // A workspace/account id can cover several distinct user logins. Compare the
                 // per-user id when both emails are known and different; never dedupe on workspace
                 // id alone in that case.
-                return user_id.is_some_and(|candidate| {
-                    current_user_id.as_deref() == Some(candidate)
-                });
+                return user_id
+                    .is_some_and(|candidate| current_user_id.as_deref() == Some(candidate));
             }
-            if user_id.is_some_and(|candidate| {
-                current_user_id.as_deref() == Some(candidate)
-            }) {
+            if user_id.is_some_and(|candidate| current_user_id.as_deref() == Some(candidate)) {
                 return true;
             }
             // Only fall back to the shared workspace id when neither profile exposed a user id
@@ -3156,54 +3624,55 @@ fn build_snapshot(
         ToolId::Opencode,
         ToolId::Antigravity,
     ]
-        .into_iter()
-        .map(|tool_id| {
-            let mut accounts = data
-                .accounts
-                .iter()
-                .filter(|account| {
-                    account.tool_id == tool_id
-                        && (show_virtual_api || !is_virtual_api_account(account))
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            // Default first, the rest by name.
-            accounts.sort_by(|a, b| {
-                b.is_default
-                    .cmp(&a.is_default)
-                    .then_with(|| a.name.cmp(&b.name))
-            });
-            if matches!(tool_id, ToolId::Codex) {
-                let default_dir = configured_default_config_dir(data, &tool_id)
-                    .unwrap_or_else(|| default_config_dir(&tool_id));
-                for account in accounts.iter_mut() {
-                    let config_dir =
-                        account_config_dir_with_default(store, account, &default_dir);
-                    account.account_email = crate::quota::codex_account_email(&config_dir);
-                }
+    .into_iter()
+    .map(|tool_id| {
+        let mut accounts = data
+            .accounts
+            .iter()
+            .filter(|account| {
+                account.tool_id == tool_id && (show_virtual_api || !is_virtual_api_account(account))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        // Default first, the rest by name.
+        accounts.sort_by(|a, b| {
+            b.is_default
+                .cmp(&a.is_default)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        if matches!(tool_id, ToolId::Codex) {
+            let default_dir = configured_default_config_dir(data, &tool_id)
+                .unwrap_or_else(|| default_config_dir(&tool_id));
+            for account in accounts.iter_mut() {
+                let config_dir = account_config_dir_with_default(store, account, &default_dir);
+                account.account_email = crate::quota::codex_account_email(&config_dir);
             }
-            if matches!(tool_id, ToolId::Claude) {
-                for account in accounts.iter_mut() {
-                    account.account_email = data.claude_orgs.values()
-                        .find(|org| org.account_ids.contains(&account.id)).and_then(|org| org.email.clone());
-                }
+        }
+        if matches!(tool_id, ToolId::Claude) {
+            for account in accounts.iter_mut() {
+                account.account_email = data
+                    .claude_orgs
+                    .values()
+                    .find(|org| org.account_ids.contains(&account.id))
+                    .and_then(|org| org.email.clone());
             }
-            // Antigravity: attach the Google avatar (account identity) for the UI to display.
-            if matches!(tool_id, ToolId::Antigravity) {
-                for account in accounts.iter_mut() {
-                    account.avatar_url = crate::tools::antigravity_avatar_url(store, &account.id);
-                }
+        }
+        // Antigravity: attach the Google avatar (account identity) for the UI to display.
+        if matches!(tool_id, ToolId::Antigravity) {
+            for account in accounts.iter_mut() {
+                account.avatar_url = crate::tools::antigravity_avatar_url(store, &account.id);
             }
-            let active_account_id = active_account_id_for(store, &tool_id, &accounts);
-            ToolStatus {
-                id: tool_id.clone(),
-                name: tool_id.display_name().to_string(),
-                installed: is_installed_resolved(data, &tool_id),
-                active_account_id,
-                accounts,
-            }
-        })
-        .collect();
+        }
+        let active_account_id = active_account_id_for(store, &tool_id, &accounts);
+        ToolStatus {
+            id: tool_id.clone(),
+            name: tool_id.display_name().to_string(),
+            installed: is_installed_resolved(data, &tool_id),
+            active_account_id,
+            accounts,
+        }
+    })
+    .collect();
 
     AppSnapshot {
         tools,
@@ -3216,6 +3685,23 @@ fn build_snapshot(
             config: redacted_api_gateway_config(data),
             status,
         },
+        desktop_sync: data.desktop_sync.clone(),
+        desktops: crate::desktop::runtime(),
+        selected_codex_home: active_account_id_for(store, &ToolId::Codex, &data.accounts).and_then(
+            |id| {
+                data.accounts
+                    .iter()
+                    .find(|a| a.tool_id == ToolId::Codex && a.id == id)
+                    .map(|account| {
+                        account_config_dir_with_default(
+                            store,
+                            account,
+                            &resolved_default_config_dir(data, &ToolId::Codex),
+                        )
+                    })
+            },
+        ),
+        shared_codex_home: resolved_default_config_dir(data, &ToolId::Codex),
     }
 }
 
@@ -3565,9 +4051,7 @@ fn claude_org_labels(
                 .email
                 .clone()
                 .or_else(|| record.organization_name.clone())
-                .unwrap_or_else(|| {
-                    format!("Org {}", org_uuid.chars().take(8).collect::<String>())
-                });
+                .unwrap_or_else(|| format!("Org {}", org_uuid.chars().take(8).collect::<String>()));
             let account_names = record
                 .account_ids
                 .iter()
@@ -3934,34 +4418,58 @@ mod tests {
     }
 
     fn lock(enabled: bool, threshold: f64, locked: bool) -> WeeklyLock {
-        WeeklyLock { enabled, threshold, locked }
+        WeeklyLock {
+            enabled,
+            threshold,
+            locked,
+        }
     }
 
     #[test]
     fn weekly_lock_locks_at_threshold() {
-        let account = with_weekly(test_account("a", false, 10.0), Some(80.0), lock(true, 80.0, false));
+        let account = with_weekly(
+            test_account("a", false, 10.0),
+            Some(80.0),
+            lock(true, 80.0, false),
+        );
         assert_eq!(weekly_lock_transition(&account), Some(true));
     }
 
     #[test]
     fn weekly_lock_stays_below_threshold() {
-        let account = with_weekly(test_account("a", false, 10.0), Some(79.0), lock(true, 80.0, false));
+        let account = with_weekly(
+            test_account("a", false, 10.0),
+            Some(79.0),
+            lock(true, 80.0, false),
+        );
         assert_eq!(weekly_lock_transition(&account), None);
     }
 
     #[test]
     fn weekly_lock_unlocks_after_weekly_reset() {
-        let account = with_weekly(test_account("a", false, 10.0), Some(2.0), lock(true, 80.0, true));
+        let account = with_weekly(
+            test_account("a", false, 10.0),
+            Some(2.0),
+            lock(true, 80.0, true),
+        );
         assert_eq!(weekly_lock_transition(&account), Some(false));
     }
 
     #[test]
     fn weekly_lock_ignores_disarmed_and_unknown_quota() {
-        let off = with_weekly(test_account("a", false, 10.0), Some(95.0), lock(false, 80.0, false));
+        let off = with_weekly(
+            test_account("a", false, 10.0),
+            Some(95.0),
+            lock(false, 80.0, false),
+        );
         assert_eq!(weekly_lock_transition(&off), None);
         let unknown = with_weekly(test_account("b", false, 10.0), None, lock(true, 80.0, true));
         assert_eq!(weekly_lock_transition(&unknown), None);
-        let mut failed = with_weekly(test_account("c", false, 10.0), Some(0.0), lock(true, 80.0, true));
+        let mut failed = with_weekly(
+            test_account("c", false, 10.0),
+            Some(0.0),
+            lock(true, 80.0, true),
+        );
         failed.quota.as_mut().unwrap().error = Some("network".into());
         assert_eq!(weekly_lock_transition(&failed), None);
     }
@@ -3969,7 +4477,11 @@ mod tests {
     #[test]
     fn best_replacement_skips_locked_accounts() {
         let accounts = vec![
-            with_weekly(test_account("locked-plenty", false, 0.0), Some(0.0), lock(true, 80.0, true)),
+            with_weekly(
+                test_account("locked-plenty", false, 0.0),
+                Some(0.0),
+                lock(true, 80.0, true),
+            ),
             test_account("open-used", false, 40.0),
         ];
         let best = best_replacement(&accounts, &ToolId::Claude, 100.0, None).unwrap();
@@ -3986,7 +4498,11 @@ mod tests {
         assert_eq!(best.id, "visible-used");
     }
 
-    fn claude_identity(org_uuid: &str, org_name: Option<&str>, email: Option<&str>) -> ClaudeProfileIdentity {
+    fn claude_identity(
+        org_uuid: &str,
+        org_name: Option<&str>,
+        email: Option<&str>,
+    ) -> ClaudeProfileIdentity {
         ClaudeProfileIdentity {
             org_uuid: org_uuid.to_string(),
             org_name: org_name.map(str::to_string),
