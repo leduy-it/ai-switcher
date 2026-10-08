@@ -2,6 +2,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import type {
   AddAccountInput,
   AddApiAccountInput,
+  ImportCodexAccountInput,
   ApiUsageReport,
   AppSnapshot,
   DetectionReport,
@@ -698,6 +699,8 @@ export const api = {
   refreshAccount: (toolId: ToolId, accountId: string) =>
     invoke<AppSnapshot>("refresh_account", { toolId, accountId }),
   addAccount: (input: AddAccountInput) => invoke<AppSnapshot>("add_account", { input }),
+  importCodexAccount: (input: ImportCodexAccountInput) =>
+    invoke<AppSnapshot>("import_codex_account", { input }),
   addApiAccount: (input: AddApiAccountInput) => invoke<AppSnapshot>("add_api_account", { input }),
   fetchGatewayModels: (baseUrl: string, apiKey: string) =>
     invoke<string[]>("fetch_gateway_models", { baseUrl, apiKey }),

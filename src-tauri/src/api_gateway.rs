@@ -2771,6 +2771,7 @@ mod tests {
             id: id.to_string(),
             tool_id,
             name: id.to_string(),
+            account_email: None,
             state: AccountState::Idle,
             fingerprint: format!("profile:{id}"),
             created_at: "2026-06-14T00:00:00Z".to_string(),

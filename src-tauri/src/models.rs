@@ -432,6 +432,9 @@ pub struct Account {
     pub id: String,
     pub tool_id: ToolId,
     pub name: String,
+    /// Login email extracted from Codex OAuth tokens for display. Never contains token material.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_email: Option<String>,
     pub state: AccountState,
     pub fingerprint: String,
     pub created_at: String,
@@ -767,6 +770,14 @@ pub struct AddAccountInput {
     /// Custom command name (e.g. `claude-work`) — required for Claude/Codex (Login mode).
     #[serde(default)]
     pub launcher: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCodexAccountInput {
+    pub name: String,
+    pub launcher: String,
+    pub auth_file_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

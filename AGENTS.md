@@ -62,6 +62,9 @@
     home, so CLI profiles and Codex Desktop use one thread catalog while each profile keeps its own
     `CODEX_HOME` and `auth.json`. Never symlink SQLite files directly; keep memories/goals databases
     profile-local to avoid lock contention.
+- Codex OAuth `auth.json` imports copy only validated OAuth profile files into Switcher's profile dir
+  with private file permissions; never link the source credential. Account email is display metadata
+  extracted from JWT claims only, not token content sent to the UI.
 - Do not apply shared config symlinks to API/proxy accounts, because their gateway/model/key config is intentionally account-specific.
 
 ## Frontend Notes
@@ -69,6 +72,7 @@
 - `src/App.tsx` is the main UI: tool tabs, account cards, modals, auto-switch settings.
 - `src/UsageView.tsx` renders token/cost usage.
 - `src/OverlayApp.tsx` + `src/overlay.css` render the floating quota overlay; `src/main.tsx` picks it by window label.
+- `src/theme.ts` persists the appearance selection and applies it to both the main window and overlay.
 - `src/tauri.ts` wraps invoke calls and contains mock data for browser/dev fallback.
 - `src/types.ts` mirrors Rust DTOs.
 

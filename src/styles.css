@@ -22,9 +22,11 @@
   --edge: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   --edge-strong: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 
-  /* Accent (warm orange) + status */
+  /* Accent + status */
   --accent: #fb6a1a;
   --accent-press: #e85c0c;
+  --accent-bright: #fb8a2a;
+  --accent-rgb: 251, 106, 26;
   --accent-soft: rgba(251, 106, 26, 0.16);
   --accent-grad: linear-gradient(135deg, #fb8a2a 0%, #e85c0c 100%);
   --accent-grad-hover: linear-gradient(135deg, #fc9a3f 0%, #f0570c 100%);
@@ -45,13 +47,40 @@
   color: var(--text);
   /* Warm radial glow from the top, over the deep base. */
   background:
-    radial-gradient(1100px 620px at 50% -14%, rgba(251, 106, 26, 0.1), transparent 62%),
+    radial-gradient(1100px 620px at 50% -14%, rgba(var(--accent-rgb), 0.1), transparent 62%),
     var(--bg-window);
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", system-ui, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
+}
+
+:root[data-profile-theme="michael-blue"] {
+  --bg-window: #0a1220;
+  --bg-sidebar: rgba(99, 160, 238, 0.035);
+  --surface: #111c2d;
+  --surface-2: #17243a;
+  --surface-hover: #20334f;
+  --text: #edf5ff;
+  --text-2: #b2c5dc;
+  --text-3: #8196b1;
+  --line: rgba(170, 202, 240, 0.1);
+  --line-strong: rgba(170, 202, 240, 0.18);
+  --edge: inset 0 1px 0 rgba(210, 231, 255, 0.06);
+  --edge-strong: inset 0 1px 0 rgba(210, 231, 255, 0.1);
+  --accent: #63aaff;
+  --accent-press: #3e8cf0;
+  --accent-bright: #a4d0ff;
+  --accent-rgb: 86, 158, 244;
+  --accent-soft: rgba(var(--accent-rgb), 0.18);
+  --accent-grad: linear-gradient(135deg, #64b0ff 0%, #347fe0 100%);
+  --accent-grad-hover: linear-gradient(135deg, #83c1ff 0%, #4a94f0 100%);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.32);
+  --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.66), 0 4px 14px rgba(0, 0, 0, 0.48);
+  background:
+    radial-gradient(1100px 620px at 50% -14%, rgba(var(--accent-rgb), 0.15), transparent 62%),
+    var(--bg-window);
 }
 
 * {
@@ -120,13 +149,13 @@ button.accent {
   border-color: transparent;
   color: #fff;
   font-weight: 600;
-  box-shadow: 0 4px 16px rgba(251, 106, 26, 0.32);
+  box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.32);
 }
 
 button.primary:hover:not(:disabled),
 button.accent:hover:not(:disabled) {
   background: var(--accent-grad-hover);
-  box-shadow: 0 6px 20px rgba(251, 106, 26, 0.42);
+  box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.42);
 }
 
 button.danger {
@@ -362,6 +391,10 @@ button.danger:hover:not(:disabled) {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .footMeta small {
@@ -372,6 +405,8 @@ button.danger:hover:not(:disabled) {
 .footBy {
   align-self: flex-start;
   margin-top: 3px;
+  max-width: 100%;
+  overflow: hidden;
   padding: 0;
   min-height: 0;
   background: none;
@@ -380,6 +415,8 @@ button.danger:hover:not(:disabled) {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .footBy:hover:not(:disabled) {
@@ -418,7 +455,7 @@ button.danger:hover:not(:disabled) {
   background: var(--accent-grad);
   border-color: transparent;
   color: #fff;
-  box-shadow: 0 4px 16px rgba(251, 106, 26, 0.3);
+  box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
 }
 
 .toolTab.selected small {
@@ -1587,6 +1624,31 @@ div.quotaError .linkBtn {
   font-size: 12px;
 }
 
+.themeOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.themeOption {
+  flex: 1 1 220px;
+  justify-content: flex-start;
+  min-height: 38px;
+  text-align: left;
+}
+
+.themeOption.selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.themeCredit {
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
 .cliSetup.needsSetup {
   border-color: rgba(252, 211, 77, 0.45);
 }
@@ -2247,7 +2309,7 @@ div.quotaError .linkBtn {
 }
 .projectCard {
   background:
-    linear-gradient(135deg, rgba(251, 106, 26, 0.035), transparent 45%),
+    linear-gradient(135deg, rgba(var(--accent-rgb), 0.035), transparent 45%),
     var(--surface-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2427,7 +2489,7 @@ div.quotaError .linkBtn {
 }
 .usageAccountRow.selected {
   background:
-    linear-gradient(135deg, rgba(251, 106, 26, 0.05), transparent 55%),
+    linear-gradient(135deg, rgba(var(--accent-rgb), 0.05), transparent 55%),
     var(--surface-2);
   border-color: var(--accent);
 }
@@ -3002,7 +3064,7 @@ div.quotaError .linkBtn {
 .primeNowBtn {
   align-items: center;
   background: var(--accent-soft);
-  border: 1px solid rgba(251, 106, 26, 0.35);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
   border-radius: var(--radius-sm);
   color: var(--accent);
   cursor: pointer;
@@ -3015,7 +3077,7 @@ div.quotaError .linkBtn {
 }
 
 .primeNowBtn:hover:not(:disabled) {
-  background: rgba(251, 106, 26, 0.18);
+  background: rgba(var(--accent-rgb), 0.18);
 }
 
 .primeNowBtn:disabled {
@@ -3262,7 +3324,7 @@ div.quotaError .linkBtn {
 }
 
 .overlayPick.on {
-  border-color: rgba(251, 106, 26, 0.45);
+  border-color: rgba(var(--accent-rgb), 0.45);
   background: var(--accent-soft);
   color: var(--text);
 }

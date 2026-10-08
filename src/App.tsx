@@ -21,6 +21,7 @@ import {
   LockOpen,
   LogIn,
   Pencil,
+  Palette,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -34,13 +35,16 @@ import {
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "./tauri";
 import { UsageView } from "./UsageView";
 import logoUrl from "./assets/logo.svg";
+import michaelLogoUrl from "./assets/logo-michael.svg";
+import { ProfileTheme, readProfileTheme, saveProfileTheme } from "./theme";
 import type {
   Account,
   AddAccountInput,
@@ -55,6 +59,7 @@ import type {
   ConfigCandidate,
   CreateApiGatewayKeyInput,
   DetectionReport,
+  ImportCodexAccountInput,
   OrphanAccountDir,
   OverlaySettings,
   PrimeNowDone,
@@ -140,6 +145,7 @@ const emptySnapshot: AppSnapshot = {
 
 export function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>(emptySnapshot);
+  const [profileTheme, setProfileTheme] = useState<ProfileTheme>(() => readProfileTheme());
   // Every full-snapshot fetch takes a ticket, and only the newest ticket may write state. Without
   // this a background quota poll that started before a switch/delete could land afterwards and put
   // the pre-action snapshot back on screen.
@@ -192,6 +198,15 @@ export function App() {
       .then(setVersion)
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    saveProfileTheme(profileTheme);
+    const title = profileTheme === "michael-blue" ? "Michael Le (duyle) Profiles" : "AI Account Switcher";
+    if ("__TAURI_INTERNALS__" in window) {
+      void getCurrentWindow().setTitle(title).catch(() => {});
+      void emit("profile-theme-changed", profileTheme).catch(() => {});
+    }
+  }, [profileTheme]);
 
   const load = useCallback(async () => {
     setBusy("load");
@@ -558,16 +573,24 @@ export function App() {
           </div>
 
           <div className="sidebarFoot">
-            <img className="footLogo" src={logoUrl} alt="" />
+            <img
+              className="footLogo"
+              src={profileTheme === "michael-blue" ? michaelLogoUrl : logoUrl}
+              alt=""
+            />
             <div className="footMeta">
-              <strong>AI Account Switcher</strong>
+              <strong>
+                {profileTheme === "michael-blue" ? "Michael Le (duyle) Profiles" : "AI Account Switcher"}
+              </strong>
               <small>{version ? `v${version}` : ""}</small>
               <button
                 className="footBy"
                 onClick={() => void openUrl("https://hoangphan.blog/").catch(() => {})}
                 title="https://hoangphan.blog/"
               >
-                Powered by Hoàng Phan
+                {profileTheme === "michael-blue"
+                  ? "Original project by Hoàng Phan"
+                  : "Powered by Hoàng Phan"}
               </button>
             </div>
           </div>
@@ -635,6 +658,8 @@ export function App() {
             snapshot={snapshot}
             busy={busy !== null}
             notify={notify}
+            profileTheme={profileTheme}
+            onProfileThemeChange={setProfileTheme}
             onSetup={(toolId) => {
               setSelectedTool(toolId);
               setDialog("setup");
@@ -875,6 +900,11 @@ export function App() {
               setDialog(null);
             }
           }}
+          onImportCodex={async (input) => {
+            if (await run("add", () => api.importCodexAccount(input))) {
+              setDialog(null);
+            }
+          }}
           onSubmitApi={async (input) => {
             if (await run("add", () => api.addApiAccount(input))) {
               setDialog(null);
@@ -970,12 +1000,16 @@ function SettingsView({
   snapshot,
   busy,
   notify,
+  profileTheme,
+  onProfileThemeChange,
   onSetup,
   onAutoSwitchChange,
 }: {
   snapshot: AppSnapshot;
   busy: boolean;
   notify: (text: string, kind?: "success" | "error" | "info") => void;
+  profileTheme: ProfileTheme;
+  onProfileThemeChange: (theme: ProfileTheme) => void;
   onSetup: (toolId: ToolId) => void;
   onAutoSwitchChange: (toolId: ToolId, enabled: boolean, threshold: number) => void;
 }) {
@@ -1036,6 +1070,37 @@ function SettingsView({
       </div>
 
       <div className="settingsList">
+        <div className="settingsSection">
+          <div className="settingsSectionHead">
+            <Palette />
+            <div>
+              <strong>Appearance</strong>
+              <small>Keep the original look or use your own blue profile theme.</small>
+            </div>
+          </div>
+          <div className="themeOptions" role="group" aria-label="Application theme">
+            <button
+              type="button"
+              className={`themeOption ${profileTheme === "original" ? "selected" : ""}`}
+              aria-pressed={profileTheme === "original"}
+              onClick={() => onProfileThemeChange("original")}
+            >
+              Original · AI Account Switcher
+            </button>
+            <button
+              type="button"
+              className={`themeOption ${profileTheme === "michael-blue" ? "selected" : ""}`}
+              aria-pressed={profileTheme === "michael-blue"}
+              onClick={() => onProfileThemeChange("michael-blue")}
+            >
+              Michael Le (duyle) Profiles · Blue
+            </button>
+          </div>
+          <p className="themeCredit">
+            The original theme and logo remain available; the original project is by Hoàng Phan.
+          </p>
+        </div>
+
         {cliTools.map((tool) => (
           <CliSetupBar
             key={tool.id}
@@ -2442,6 +2507,11 @@ function AccountCard({
                 </button>
               )}
             </div>
+            {account.accountEmail && !isApi && (
+              <span className="fingerprint" title="Codex account email">
+                {account.accountEmail}
+              </span>
+            )}
             {isApi && (
               <span className="fingerprint" title={account.apiProvider!.baseUrl}>
                 via {gatewayHost(account.apiProvider!.baseUrl)}
@@ -2846,26 +2916,32 @@ function AddDialog({
   tool,
   onClose,
   onSubmit,
+  onImportCodex,
   onSubmitApi,
 }: {
   tool: ToolStatus;
   onClose: () => void;
   onSubmit: (input: AddAccountInput) => Promise<void>;
+  onImportCodex: (input: ImportCodexAccountInput) => Promise<void>;
   onSubmitApi: (input: AddApiAccountInput) => Promise<void>;
 }) {
   const isCli = tool.id !== "antigravity";
   // API/proxy accounts are supported for the CLI tools (Codex + Claude Code).
   const canApi = tool.id === "codex" || tool.id === "claude";
+  const canImportCodex = tool.id === "codex";
   const bypassFlag =
     tool.id === "claude"
       ? "--dangerously-skip-permissions"
       : "--dangerously-bypass-approvals-and-sandbox";
-  const [kind, setKind] = useState<"login" | "api">("login");
+  const [kind, setKind] = useState<"login" | "import" | "api">("login");
   const isApi = canApi && kind === "api";
+  const isImport = canImportCodex && kind === "import";
 
   const [name, setName] = useState("");
   const [launcher, setLauncher] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  const [authFilePath, setAuthFilePath] = useState<string | null>(null);
+  const [authFileName, setAuthFileName] = useState<string | null>(null);
 
   // API-mode state.
   const [baseUrl, setBaseUrl] = useState("");
@@ -2916,6 +2992,21 @@ function AddDialog({
     }
   };
 
+  const chooseCodexAuthFile = async () => {
+    setMessage(null);
+    try {
+      const selected = await openFileDialog({
+        multiple: false,
+        filters: [{ name: "Codex auth.json", extensions: ["json"] }],
+      });
+      if (typeof selected !== "string") return;
+      setAuthFilePath(selected);
+      setAuthFileName(selected.split(/[\\/]/).pop() ?? "auth.json");
+    } catch (err) {
+      setMessage(errorMessage(err));
+    }
+  };
+
   const submit = async () => {
     if (submitting) return;
     if (name.trim().length > 20) {
@@ -2926,14 +3017,26 @@ function AddDialog({
       setMessage(`A custom command is required (e.g. ${launcherExample(tool.id)})`);
       return;
     }
+    if (isImport && !authFilePath) {
+      setMessage("Choose a Codex auth.json file to import");
+      return;
+    }
     setSubmitting(true);
     try {
-      await onSubmit({
-        toolId: tool.id,
-        name: name.trim(),
-        mode: isCli ? "login" : "import",
-        launcher: isCli ? launcher.trim() : undefined,
-      });
+      if (isImport && authFilePath) {
+        await onImportCodex({
+          name: name.trim(),
+          launcher: launcher.trim(),
+          authFilePath,
+        });
+      } else {
+        await onSubmit({
+          toolId: tool.id,
+          name: name.trim(),
+          mode: isCli ? "login" : "import",
+          launcher: isCli ? launcher.trim() : undefined,
+        });
+      }
     } finally {
       setSubmitting(false);
     }
@@ -2980,6 +3083,15 @@ function AddDialog({
             >
               Subscription (login)
             </button>
+            {canImportCodex && (
+              <button
+                type="button"
+                className={kind === "import" ? "active" : ""}
+                onClick={() => setKind("import")}
+              >
+                Import auth.json
+              </button>
+            )}
             <button
               type="button"
               className={kind === "api" ? "active" : ""}
@@ -3018,6 +3130,22 @@ function AddDialog({
               placeholder={launcherExample(tool.id)}
             />
           </label>
+        )}
+
+        {isImport && (
+          <>
+            <button type="button" className="fetchModels" onClick={chooseCodexAuthFile}>
+              <Plus />
+              {authFilePath ? "Choose another auth.json" : "Choose Codex auth.json"}
+            </button>
+            <p className="hint">
+              {authFileName
+                ? `Selected ${authFileName}.`
+                : "Choose the auth.json from the Codex account you want to add."} The credentials
+              are copied into a separate Switcher profile; the original file is left untouched. Use
+              one profile for this login at a time so Codex's rotating refresh tokens don't conflict.
+            </p>
+          </>
         )}
 
         {isApi && (
@@ -3124,7 +3252,13 @@ function AddDialog({
           </button>
           <button className="primary" onClick={isApi ? submitApi : submit} disabled={submitting}>
             {submitting && <Loader2 className="spin" size={14} />}
-            {isApi ? "Create account" : isCli ? "Create & login" : "Save this account"}
+            {isApi
+              ? "Create account"
+              : isImport
+                ? "Import account"
+                : isCli
+                  ? "Create & login"
+                  : "Save this account"}
           </button>
         </div>
       </section>

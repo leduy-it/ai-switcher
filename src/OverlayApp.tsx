@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Check, Loader2, RefreshCw, Settings2, X } from "lucide-react";
 import { api } from "./tauri";
+import { applyProfileTheme, type ProfileTheme } from "./theme";
 import type { AppSnapshot, OverlaySettings, QuotaInfo, QuotaWindow, ToolId } from "./types";
 import "./overlay.css";
 
@@ -115,6 +116,15 @@ export function OverlayApp() {
     mounted.current = true;
     return () => {
       mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const unlisten = listen<ProfileTheme>("profile-theme-changed", (event) =>
+      applyProfileTheme(event.payload),
+    );
+    return () => {
+      void unlisten.then((fn) => fn());
     };
   }, []);
 
