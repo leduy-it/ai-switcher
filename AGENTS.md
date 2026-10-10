@@ -42,6 +42,8 @@
 - `menubar.rs`: a separate quota-table dropdown anchored to the status icon (label `menubar`).
 - `credential_export.rs`: explicit provider/all credential backups; secrets stay in Rust and the
   JSON is saved atomically with owner-only permissions, including raw auth sources and usage.
+- `credential_import.rs`: validates versioned backup JSON and keeps imported secret values in Rust;
+  the UI receives metadata-only previews and result counts.
 - `usage.rs`: scans Claude/Codex JSONL logs and builds the Usage tab report.
 - `pricing.rs`: LiteLLM price cache and model-price lookup.
 
@@ -87,6 +89,12 @@
 - Codex OAuth `auth.json` imports copy only validated OAuth profile files into Switcher's profile dir
   with private file permissions; never link the source credential. Account email is display metadata
   extracted from JWT claims only, not token content sent to the UI.
+- Provider backup import appends Codex/Claude OAuth and API/proxy profiles into new local profile
+  IDs. Skip duplicate identities/credential sources without replacing local profiles. Keep raw tokens
+  out of the webview and logs; Claude OAuth must be stored in the destination profile's macOS
+  Keychain item and a private profile credential file. Backup import does not restore session,
+  history, quota or usage state. Never test with a real exported credential unless the user
+  explicitly authorizes that transfer.
 - `codex_import.rs` accepts one raw OAuth source: pasted JSON or a file. Parsing is local and has
   no provider calls or account writes. Return email/field names/duplicate status only; never echo
   token values in errors or persist the dialog's pasted JSON outside the private import flow.

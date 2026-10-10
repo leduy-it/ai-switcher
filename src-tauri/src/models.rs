@@ -719,6 +719,36 @@ pub struct CredentialsExportResult {
     pub warning_count: usize,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialsImportPreviewAccount {
+    pub tool_id: ToolId,
+    pub name: String,
+    pub email: Option<String>,
+    pub kind: String,
+    pub already_added: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialsImportPreview {
+    pub accounts: Vec<CredentialsImportPreviewAccount>,
+    pub unsupported_count: usize,
+    pub unavailable_count: usize,
+    pub invalid_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialsImportResult {
+    pub imported_count: usize,
+    pub duplicate_count: usize,
+    pub unsupported_count: usize,
+    pub unavailable_count: usize,
+    pub invalid_count: usize,
+    pub failed_count: usize,
+}
+
 /// Result of an on-demand "Prime ngay": a short message plus a kind the UI maps to a toast colour.
 /// `success` = a new window opened; `info` = nothing wrong but no new window (the old one is still
 /// running — a Hold); `error` = an actual failure (no token / send failed / unconfirmed).

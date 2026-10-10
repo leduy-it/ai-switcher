@@ -33,6 +33,7 @@ import {
   ShieldAlert,
   Terminal,
   Trash2,
+  Upload,
   Users,
   X,
   Zap,
@@ -62,6 +63,7 @@ import type {
   ConfigCandidate,
   CreateApiGatewayKeyInput,
   DetectionReport,
+  CredentialsImportPreview,
   ImportCodexAccountInput,
   OrphanAccountDir,
   OverlaySettings,
@@ -1184,8 +1186,13 @@ function SettingsView({
 
         <div className="settingsSection">
           <div className="settingsSectionHead"><Download /><div><strong>Export credentials</strong><small>Raw authentication, available account email, profile fields, quota and usage at export time.</small></div></div>
-          <p className="orphanHint">Exports contain plaintext tokens and API keys. Save them somewhere private. Hidden accounts are included.</p>
+          <p className="orphanHint">Exports contain plaintext tokens/API keys plus account, quota, usage and project-attribution details. Hidden accounts are included. Store privately and share only with trusted people.</p>
           <div className="credentialExportActions"><CredentialExportButton toolId={null} notify={notify} />{snapshot.tools.map((tool) => <CredentialExportButton key={tool.id} toolId={tool.id} notify={notify} />)}</div>
+          <div className="credentialImportBlock">
+            <div className="settingsSectionHead"><Upload /><div><strong>Import a credential backup</strong><small>Add Codex and Claude Code subscription or API / Proxy accounts from this app’s JSON export.</small></div></div>
+            <p className="orphanHint">Backup JSON contains plaintext tokens or API keys. Import only a file you trust. New profiles are appended and duplicates are skipped; local accounts and chat history are not replaced or transferred. Claude OAuth is restored to a private profile and macOS Keychain. Refresh tokens may rotate, so avoid using one login on multiple computers at the same time.</p>
+            <CredentialImportControl notify={notify} />
+          </div>
         </div>
 
         <div className="settingsSection">
@@ -1217,6 +1224,100 @@ function CredentialExportButton({ toolId, notify }: { toolId: ToolId | null; not
     finally { setExporting(false); }
   };
   return <button disabled={exporting} onClick={() => void exportFile()} title="Save raw credentials, email, quota and usage to a private JSON file">{exporting ? <Loader2 className="spin" size={14} /> : <Download size={14} />}Export {label}</button>;
+}
+
+function CredentialImportControl({ notify }: { notify: (text: string, kind?: "success" | "error" | "info") => void }) {
+  const [path, setPath] = useState<string | null>(null);
+  const [preview, setPreview] = useState<CredentialsImportPreview | null>(null);
+  const [scope, setScope] = useState<ToolId | null>(null);
+  const [busy, setBusy] = useState(false);
+  const chooseFile = async () => {
+    setBusy(true);
+    setPath(null);
+    setPreview(null);
+    try {
+      const selected = await openFileDialog({
+        title: "Choose a Michael Le Profiles credential backup",
+        multiple: false,
+        filters: [{ name: "Credential backup JSON", extensions: ["json"] }],
+      });
+      if (typeof selected !== "string") return;
+      setPath(selected);
+      setPreview(await api.previewCredentialsImport(selected, scope));
+    } catch (error) {
+      setPath(null);
+      notify(errorMessage(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const changeScope = async (value: string) => {
+    const next = value === "all" ? null : (value as ToolId);
+    setScope(next);
+    if (!path) return;
+    setBusy(true);
+    setPreview(null);
+    try {
+      setPreview(await api.previewCredentialsImport(path, next));
+    } catch (error) {
+      notify(errorMessage(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const importFile = async () => {
+    if (!path || !preview || preview.accounts.every((account) => account.alreadyAdded)) return;
+    setBusy(true);
+    try {
+      const result = await api.importCredentials(path, scope);
+      const details = [
+        result.duplicateCount ? `${result.duplicateCount} duplicate${result.duplicateCount === 1 ? "" : "s"} skipped` : "",
+        result.unsupportedCount ? `${result.unsupportedCount} unsupported provider account${result.unsupportedCount === 1 ? "" : "s"} skipped` : "",
+        result.unavailableCount ? `${result.unavailableCount} account${result.unavailableCount === 1 ? "" : "s"} had no available credentials` : "",
+        result.invalidCount ? `${result.invalidCount} invalid entr${result.invalidCount === 1 ? "y" : "ies"} skipped` : "",
+        result.failedCount ? `${result.failedCount} could not be added; check CLI setup and Keychain access` : "",
+      ].filter(Boolean);
+      notify(
+        `Added ${result.importedCount} account${result.importedCount === 1 ? "" : "s"}${details.length ? ` · ${details.join(" · ")}` : ""}`,
+        result.failedCount ? "info" : "success",
+      );
+      setPath(null);
+      setPreview(null);
+    } catch (error) {
+      notify(errorMessage(error), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const readyCount = preview?.accounts.filter((account) => !account.alreadyAdded).length ?? 0;
+  return <div className="credentialImportControl">
+    <button type="button" disabled={busy} onClick={() => void chooseFile()}>
+      {busy ? <Loader2 className="spin" size={14} /> : <Upload size={14} />}
+      {path ? "Choose another JSON file" : "Choose JSON backup"}
+    </button>
+    {path && <span className="muted credentialImportFile">{path.split(/[\\/]/).pop()}</span>}
+    {path && <label className="credentialImportScope">Provider scope
+      <select disabled={busy} value={scope ?? "all"} onChange={(event) => void changeScope(event.target.value)}>
+        <option value="all">All supported providers</option>
+        <option value="claude">Claude Code</option>
+        <option value="codex">Codex</option>
+      </select>
+    </label>}
+    {preview && <div className="credentialImportPreview">
+      {preview.accounts.length > 0 ? <ul>{preview.accounts.map((account, index) => <li key={`${account.toolId}-${account.name}-${index}`}>
+        <span><strong>{account.toolId === "codex" ? "Codex" : "Claude Code"} · {account.name || "Imported account"}</strong><small>{account.email || account.kind}</small></span>
+        <em className={account.alreadyAdded ? "alreadyAdded" : ""}>{account.alreadyAdded ? "Already on this Mac" : account.kind}</em>
+      </li>)}</ul> : <p>No importable Codex or Claude Code accounts found in this file.</p>}
+      {(preview.unsupportedCount + preview.unavailableCount + preview.invalidCount) > 0 && <small className="muted">{[
+        preview.unsupportedCount ? `${preview.unsupportedCount} other-provider account${preview.unsupportedCount === 1 ? "" : "s"}` : "",
+        preview.unavailableCount ? `${preview.unavailableCount} missing credential source${preview.unavailableCount === 1 ? "" : "s"}` : "",
+        preview.invalidCount ? `${preview.invalidCount} invalid entr${preview.invalidCount === 1 ? "y" : "ies"}` : "",
+      ].filter(Boolean).join(" · ")} will be skipped.</small>}
+      {readyCount > 0 && <button type="button" disabled={busy} onClick={() => void importFile()}>
+        {busy ? <Loader2 className="spin" size={14} /> : <Upload size={14} />}Import {readyCount} new account{readyCount === 1 ? "" : "s"}
+      </button>}
+    </div>}
+  </div>;
 }
 
 function AutoPrimeControls({ snapshot, notify }: { snapshot: AppSnapshot; notify: (text: string, kind?: "success" | "error" | "info") => void }) {

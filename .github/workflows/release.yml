@@ -39,17 +39,28 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "AI Account Switcher ${{ github.ref_name }}"
+          releaseName: "Michael Le Profiles ${{ github.ref_name }}"
           releaseBody: |
-            Universal macOS build (`.dmg` under **Assets**).
+            Universal macOS build (`.dmg` under **Assets**). The `michael-le-profiles.dmg` asset
+            is the stable download used by the Homebrew Cask.
 
             The app is not code-signed. On first launch, right-click the app → Open,
-            or run `xattr -cr "/Applications/AI Account Switcher.app"`.
+            or run `xattr -cr "/Applications/Michael Le Profiles.app"`.
 
-            See the [CHANGELOG](https://github.com/hoangpm96/ai-switcher/blob/main/CHANGELOG.md)
+            See the [CHANGELOG](https://github.com/leduy-it/ai-switcher/blob/main/CHANGELOG.md)
             for what changed in this version.
           releaseDraft: false
           prerelease: false
           # Auto-append the list of merged commits/PRs since the last tag.
           generateReleaseNotes: true
           args: --target universal-apple-darwin
+
+      - name: Add stable Homebrew download asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dmg_file="$(find src-tauri/target -type f -path '*universal-apple-darwin/release/bundle/dmg/*.dmg' -print -quit)"
+          test -n "$dmg_file"
+          cp "$dmg_file" "$RUNNER_TEMP/michael-le-profiles.dmg"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/michael-le-profiles.dmg" --clobber

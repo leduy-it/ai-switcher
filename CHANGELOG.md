@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.15.0 — Credential backup import and Homebrew install
+
+- Add a metadata-only preview and additive restore flow for provider JSON backups. Codex and Claude
+  Code OAuth profiles and Codex/Claude API / Proxy profiles are supported. Existing logins are
+  skipped; imported credentials are stored in destination-local private profiles and Claude OAuth
+  is restored to a new profile-specific macOS Keychain item.
+- Keep provider tokens out of the webview and log output. Imported profiles receive new local IDs,
+  unique names and commands. The source backup remains unchanged; usage totals and CLI/Desktop chat
+  history are not copied. Unsupported providers and unavailable or invalid credential sources are
+  reported in the import summary.
+- Include Claude API / Proxy tokens in Claude provider exports, using the private profile settings
+  source.
+- Omit the source computer's absolute profile path from shared backup JSON. Exported usage/project
+  attribution remains in the backup and is not imported on the destination.
+- Add a Homebrew Cask and document DMG installation and Homebrew upgrades. Tagged releases also
+  attach a stable `michael-le-profiles.dmg` asset. The app remains unsigned and not notarized.
+- Bump package, Tauri and Rust versions to 0.15.0.
+
+This source change does not publish a GitHub Release or Homebrew tap update. No real backup import,
+OAuth use or Keychain write was performed.
+
 ## 0.14.0 — Desktop account handoff and recovery
 
 - Add a Codex JSON paste box with Parse JSON, email/field-name preview and duplicate detection,

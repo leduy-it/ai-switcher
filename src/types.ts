@@ -112,6 +112,30 @@ export interface Account {
   apiProvider?: ApiProvider | null;
 }
 
+export interface CredentialsImportPreviewAccount {
+  toolId: ToolId;
+  name: string;
+  email: string | null;
+  kind: string;
+  alreadyAdded: boolean;
+}
+
+export interface CredentialsImportPreview {
+  accounts: CredentialsImportPreviewAccount[];
+  unsupportedCount: number;
+  unavailableCount: number;
+  invalidCount: number;
+}
+
+export interface CredentialsImportResult {
+  importedCount: number;
+  duplicateCount: number;
+  unsupportedCount: number;
+  unavailableCount: number;
+  invalidCount: number;
+  failedCount: number;
+}
+
 export interface ToolStatus {
   id: ToolId;
   name: string;

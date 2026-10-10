@@ -31,6 +31,8 @@ and release delivery; document remaining limitations and evidence with the corre
 | 20 | Recover missing local catalog entries and paginated history; preserve the four restored morning chats | Four morning chats preserved; additive repair imported 47 additional catalog records and 28 histories from two idle profiles. Repeat repair inserted nothing and found no history conflicts; one existing cursor has pending settings metadata. GUI repair implemented; private backups retained |
 | 21 | Maintain all requirements, task status and reusable migration prompts in this repository | Implemented; living specification, audit/implementation prompts and an AGENTS.md rule require updates alongside relevant changes |
 | 22 | Paste and parse Codex credential JSON, alongside JSON file import | Implemented and included in installed 0.14.0; email/field-name preview, local format validation and duplicate checks before import. Production/native builds and Rust check passed; no real credential import or native GUI inspection performed |
+| 23 | Import provider/all credential-backup JSON additively | Implemented in source for Codex/Claude OAuth and Codex/Claude API-proxy profiles; provider-scoped metadata-only preview, duplicate skip, destination-local profiles and private credentials. Production frontend build, Rust check and universal macOS build passed; no real credential import/Keychain write performed |
+| 24 | Simplify macOS install and upgrades with DMG and Homebrew | Universal 0.15.0 DMG built at `src-tauri/target/universal-apple-darwin/release/bundle/dmg/Michael Le Profiles_0.15.0_universal.dmg`; x86_64+arm64 and DMG checksum verified. Cask/workflow added. Homebrew audit couldn't run because this Mac's Command Line Tools are outdated; tap/release not published |
 
 Automatic Hello requires the app to remain running and the computer to be awake. It spends a small
 amount of quota and only attempts a new five-hour window when live provider state allows it. Provider
@@ -41,3 +43,8 @@ live handoff, interruption and recovery continuation have not been exercised dur
 Desktop synchronization is enabled for the selected brand on the owner's installation, with no
 pending handoff at installation. Existing accounts and Hello cooldown records were retained; private
 app/settings and session-migration backups remain outside the repository. No test suite was run.
+
+Version 0.15.0 adds task 23 provider-backup restore and task 24 Homebrew/DMG installation support.
+The 0.15.0 universal DMG is a local build artifact; this change does not publish a GitHub Release or
+update the Homebrew tap. The app was not installed over the currently installed 0.14.0 app. No real
+credential JSON was imported, no macOS Keychain credential was written, and no test suite was run.

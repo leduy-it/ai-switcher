@@ -2,12 +2,13 @@ use crate::models::{
     Account, AccountState, AddAccountInput, AddApiAccountInput, ApiGatewayAccount, ApiGatewayCombo,
     ApiGatewayConfig, ApiGatewayKey, ApiGatewayServerState, ApiGatewaySnapshot, ApiProvider,
     ApiUsageReport, AppSnapshot, AutoSwitchSetting, ClaudeOrgRecord, CreateApiGatewayKeyInput,
-    CreateApiGatewayKeyResult, CreateVirtualApiAccountInput, DeleteApiGatewayComboInput,
+    CreateApiGatewayKeyResult, CreateVirtualApiAccountInput, CredentialsImportPreview,
+    CredentialsImportPreviewAccount, CredentialsImportResult, DeleteApiGatewayComboInput,
     DeleteApiGatewayKeyInput, DetectionReport, ImportCodexAccountInput, OverlayRect,
     OverlaySettings, QuotaInfo, RenameAccountInput, SaveApiGatewayComboInput,
     SetAccountHiddenInput, SetApiGatewayAccountInput, SetLauncherInput, SetToolSetupInput,
-    SetWeeklyLockInput, StartApiGatewayInput,
-    SwitchAccountInput, ToolId, ToolStatus, UsageOrgLabel, UsageReport, WeeklyLock,
+    SetWeeklyLockInput, StartApiGatewayInput, SwitchAccountInput, ToolId, ToolStatus,
+    UsageOrgLabel, UsageReport, WeeklyLock,
 };
 use crate::quota::{read_claude_profile, read_quota, ClaudeProfileIdentity};
 use crate::store::{normalize_account_states, Store, StoredState};
@@ -1323,7 +1324,11 @@ impl ManagedState {
     /// Remember where the user dragged/resized the overlay to. Called on every move/resize event,
     /// so it only touches disk when the geometry actually changed.
     pub fn set_overlay_rect(&self, rect: OverlayRect) -> Result<()> {
-        if !(rect.width.is_finite() && rect.height.is_finite() && rect.x.is_finite() && rect.y.is_finite()) {
+        if !(rect.width.is_finite()
+            && rect.height.is_finite()
+            && rect.x.is_finite()
+            && rect.y.is_finite())
+        {
             return Ok(());
         }
         let mut data = self
@@ -1523,7 +1528,12 @@ impl ManagedState {
     }
 
     pub fn auto_prime_settings(&self) -> Result<crate::models::AutoPrimeSettings> {
-        Ok(self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?.auto_prime.clone())
+        Ok(self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .auto_prime
+            .clone())
     }
 
     pub fn set_auto_prime_settings(
@@ -1546,13 +1556,25 @@ impl ManagedState {
     /// and the same guard as manual prime prevents concurrent HTTP requests.
     pub fn auto_prime_tick(&self, app: &AppHandle) {
         use std::sync::atomic::Ordering;
-        if self.priming.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() { return; }
+        if self
+            .priming
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
         let _guard = PrimingGuard::new(self);
-        let Ok(snapshot) = self.snapshot() else { return; };
+        let Ok(snapshot) = self.snapshot() else {
+            return;
+        };
         let now = chrono::Utc::now();
         let job = {
-            let Ok(mut data) = self.data.lock() else { return; };
-            if !data.auto_prime.enabled { return; }
+            let Ok(mut data) = self.data.lock() else {
+                return;
+            };
+            if !data.auto_prime.enabled {
+                return;
+            }
             let mut identities = std::collections::HashSet::new();
             let candidate = snapshot
                 .tools
@@ -1619,7 +1641,9 @@ impl ManagedState {
             let default_dir = resolved_default_config_dir(&data, &account.tool_id);
             let job = PrimeJob {
                 config_dir: account_config_dir_with_default(&self.store, &account, &default_dir),
-                tool_id: account.tool_id, account_id: account.id, account_name: account.name,
+                tool_id: account.tool_id,
+                account_id: account.id,
+                account_name: account.name,
             };
             let key = format!("{}:{}", job.tool_id.as_str(), job.account_id);
             // Persist BEFORE sending. An unconfirmed send or interrupted process gets a full 5h
@@ -1638,19 +1662,35 @@ impl ManagedState {
             }
             job
         };
-        self.append_prime_log(&format!("[AUTO PRIME] {} · {} — one Hello; existing token only", job.tool_id.as_str(), job.account_name));
-        if let Ok(settings) = self.auto_prime_settings() { let _ = app.emit("auto-prime-changed", settings); }
+        self.append_prime_log(&format!(
+            "[AUTO PRIME] {} · {} — one Hello; existing token only",
+            job.tool_id.as_str(),
+            job.account_name
+        ));
+        if let Ok(settings) = self.auto_prime_settings() {
+            let _ = app.emit("auto-prime-changed", settings);
+        }
         let result = self.run_prime(&job, Some(app), true);
         if let Ok(mut data) = self.data.lock() {
             let key = format!("{}:{}", job.tool_id.as_str(), job.account_id);
             if let Some(record) = data.auto_prime.records.get_mut(&key) {
-                record.kind = result.kind.clone(); record.message = result.message.clone();
+                record.kind = result.kind.clone();
+                record.message = result.message.clone();
             }
             let _ = self.store.save(&data);
         }
-        self.append_prime_log(&format!("[AUTO PRIME] {} · {} — {}", job.tool_id.as_str(), job.account_name, result.message));
-        if let Ok(settings) = self.auto_prime_settings() { let _ = app.emit("auto-prime-changed", settings); }
-        if let Ok(snapshot) = self.snapshot() { let _ = app.emit("snapshot-changed", snapshot); }
+        self.append_prime_log(&format!(
+            "[AUTO PRIME] {} · {} — {}",
+            job.tool_id.as_str(),
+            job.account_name,
+            result.message
+        ));
+        if let Ok(settings) = self.auto_prime_settings() {
+            let _ = app.emit("auto-prime-changed", settings);
+        }
+        if let Ok(snapshot) = self.snapshot() {
+            let _ = app.emit("snapshot-changed", snapshot);
+        }
         crate::tray::rebuild(app);
     }
 
@@ -1677,16 +1717,407 @@ impl ManagedState {
             .map(|account| {
                 let default_dir = resolved_default_config_dir(&data, &account.tool_id);
                 let mut account = account.clone();
-                let dir = if account.tool_id == ToolId::Antigravity { self.store.account_dir(&account.tool_id, &account.id) }
-                    else { account_config_dir_with_default(&self.store, &account, &default_dir) };
-                if account.tool_id == ToolId::Codex { account.account_email = crate::quota::codex_account_email(&dir); }
+                let dir = if account.tool_id == ToolId::Antigravity {
+                    self.store.account_dir(&account.tool_id, &account.id)
+                } else {
+                    account_config_dir_with_default(&self.store, &account, &default_dir)
+                };
+                if account.tool_id == ToolId::Codex {
+                    account.account_email = crate::quota::codex_account_email(&dir);
+                }
                 if account.tool_id == ToolId::Claude {
-                    account.account_email = data.claude_orgs.values().find(|org| org.account_ids.contains(&account.id)).and_then(|org| org.email.clone());
+                    account.account_email = data
+                        .claude_orgs
+                        .values()
+                        .find(|org| org.account_ids.contains(&account.id))
+                        .and_then(|org| org.email.clone());
                 }
                 (account, dir)
-            }).collect();
+            })
+            .collect();
         let usage = Some(self.usage_report(0));
         crate::credential_export::save(input, profiles, usage)
+    }
+
+    pub fn preview_credentials_import(
+        &self,
+        path: &std::path::Path,
+        scope: Option<&ToolId>,
+    ) -> Result<CredentialsImportPreview> {
+        let backup = crate::credential_import::load(path, scope)?;
+        let mut accounts = Vec::with_capacity(backup.accounts.len());
+        for imported in &backup.accounts {
+            let (kind, already_added) = match &imported.credential {
+                crate::credential_import::ImportedCredential::CodexOAuth {
+                    account_id,
+                    user_id,
+                    ..
+                } => {
+                    let data = self
+                        .data
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+                    let default_dir = resolved_default_config_dir(&data, &ToolId::Codex);
+                    (
+                        "Subscription".to_string(),
+                        codex_identity_exists(
+                            &self.store,
+                            &data,
+                            &default_dir,
+                            account_id.as_deref(),
+                            user_id.as_deref(),
+                            imported.email.as_deref(),
+                        ),
+                    )
+                }
+                crate::credential_import::ImportedCredential::ClaudeOAuth { raw_credentials } => (
+                    "Subscription".to_string(),
+                    self.claude_import_is_duplicate(raw_credentials)?,
+                ),
+                crate::credential_import::ImportedCredential::ApiProxy { api_key, provider } => (
+                    "API / Proxy".to_string(),
+                    self.api_import_is_duplicate(&imported.tool_id, api_key, provider)?,
+                ),
+            };
+            accounts.push(CredentialsImportPreviewAccount {
+                tool_id: imported.tool_id.clone(),
+                name: imported.name.clone(),
+                email: imported.email.clone(),
+                kind,
+                already_added,
+            });
+        }
+        Ok(CredentialsImportPreview {
+            accounts,
+            unsupported_count: backup.unsupported_count,
+            unavailable_count: backup.unavailable_count,
+            invalid_count: backup.invalid_count,
+        })
+    }
+
+    pub fn import_credentials(
+        &self,
+        path: &std::path::Path,
+        scope: Option<&ToolId>,
+    ) -> Result<CredentialsImportResult> {
+        let backup = crate::credential_import::load(path, scope)?;
+        let mut result = CredentialsImportResult {
+            imported_count: 0,
+            duplicate_count: 0,
+            unsupported_count: backup.unsupported_count,
+            unavailable_count: backup.unavailable_count,
+            invalid_count: backup.invalid_count,
+            failed_count: 0,
+        };
+        for imported in backup.accounts {
+            let duplicate = match &imported.credential {
+                crate::credential_import::ImportedCredential::CodexOAuth {
+                    account_id,
+                    user_id,
+                    ..
+                } => {
+                    let data = self
+                        .data
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+                    let default_dir = resolved_default_config_dir(&data, &ToolId::Codex);
+                    codex_identity_exists(
+                        &self.store,
+                        &data,
+                        &default_dir,
+                        account_id.as_deref(),
+                        user_id.as_deref(),
+                        imported.email.as_deref(),
+                    )
+                }
+                crate::credential_import::ImportedCredential::ClaudeOAuth { raw_credentials } => {
+                    self.claude_import_is_duplicate(raw_credentials)?
+                }
+                crate::credential_import::ImportedCredential::ApiProxy { api_key, provider } => {
+                    self.api_import_is_duplicate(&imported.tool_id, api_key, provider)?
+                }
+            };
+            if duplicate {
+                result.duplicate_count += 1;
+                continue;
+            }
+            match self.import_portable_account(imported) {
+                Ok(()) => result.imported_count += 1,
+                Err(_) => result.failed_count += 1,
+            }
+        }
+        Ok(result)
+    }
+
+    fn import_portable_account(
+        &self,
+        imported: crate::credential_import::ImportedAccount,
+    ) -> Result<()> {
+        use crate::credential_import::ImportedCredential;
+
+        let id = Uuid::new_v4().to_string();
+        let (default_dir, binary_path) = {
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let default_dir = configured_default_config_dir(&data, &imported.tool_id)
+                .context("Configure this CLI before importing its accounts")?;
+            let binary_path = configured_binary_path(&data, &imported.tool_id)
+                .context("Configure this CLI before importing its accounts")?;
+            (default_dir, binary_path)
+        };
+        let name = unique_import_name(&imported.tool_id, &imported.name, self)?;
+        let full_launcher = self.unique_import_launcher(&imported.tool_id, &name, &id)?;
+        let profile =
+            create_profile_with_default(&imported.tool_id, &self.store, &id, &default_dir)?;
+        let setup = (|| -> Result<()> {
+            match &imported.credential {
+                ImportedCredential::CodexOAuth { raw_auth, .. } => {
+                    link_shared_config_to(&imported.tool_id, &profile, &default_dir);
+                    write_private_codex_auth(&profile, raw_auth.as_bytes())?;
+                    write_launcher(
+                        &imported.tool_id,
+                        &self.store,
+                        &id,
+                        &full_launcher,
+                        &binary_path,
+                    )?;
+                }
+                ImportedCredential::ClaudeOAuth { raw_credentials } => {
+                    link_shared_config_to(&imported.tool_id, &profile, &default_dir);
+                    write_private_claude_credentials(&profile, raw_credentials)?;
+                    let service = format!(
+                        "Claude Code-credentials-{}",
+                        crate::quota::claude_keychain_suffix(&profile)
+                    );
+                    keyring::Entry::new(&service, "michael-le-profiles-import")
+                        .and_then(|entry| entry.set_password(raw_credentials))
+                        .map_err(|_| {
+                            anyhow::anyhow!("Couldn't save Claude credentials to macOS Keychain")
+                        })?;
+                    write_launcher(
+                        &imported.tool_id,
+                        &self.store,
+                        &id,
+                        &full_launcher,
+                        &binary_path,
+                    )?;
+                }
+                ImportedCredential::ApiProxy { api_key, provider } => {
+                    match &imported.tool_id {
+                        ToolId::Codex => {
+                            crate::tools::write_codex_proxy_config(
+                                &profile,
+                                &name,
+                                &provider.base_url,
+                                &provider.model,
+                            )?;
+                            crate::tools::write_api_key_file(&profile, api_key)?;
+                        }
+                        ToolId::Claude => {
+                            crate::tools::write_claude_proxy_settings(
+                                &profile,
+                                &provider.base_url,
+                                api_key,
+                                &provider.model,
+                            )?;
+                        }
+                        _ => anyhow::bail!("API account provider is not supported"),
+                    }
+                    crate::tools::write_api_launcher(
+                        &imported.tool_id,
+                        &self.store,
+                        &id,
+                        &full_launcher,
+                        &provider.model,
+                        provider.bypass,
+                        &binary_path,
+                    )?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = setup {
+            let _ = remove_launcher(&full_launcher);
+            let _ = delete_account_files(&imported.tool_id, &self.store, &id);
+            return Err(error);
+        }
+
+        let timestamp = now();
+        let account = Account {
+            id: id.clone(),
+            tool_id: imported.tool_id.clone(),
+            name,
+            account_email: imported.email,
+            state: AccountState::Idle,
+            fingerprint: format!("profile:{id}"),
+            created_at: timestamp.clone(),
+            updated_at: timestamp,
+            last_used_at: None,
+            quota: match &imported.credential {
+                ImportedCredential::ApiProxy { .. } => None,
+                _ => Some(read_quota(&imported.tool_id, &profile)),
+            },
+            launcher_command: Some(full_launcher.clone()),
+            is_default: false,
+            hidden: false,
+            weekly_lock: None,
+            avatar_url: None,
+            api_provider: match &imported.credential {
+                ImportedCredential::ApiProxy { provider, .. } => Some(provider.clone()),
+                _ => None,
+            },
+        };
+        let mut data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        data.accounts.push(account);
+        if let Err(error) = self.store.save(&data) {
+            data.accounts.retain(|saved| saved.id != id);
+            drop(data);
+            let _ = remove_launcher(&full_launcher);
+            let _ = delete_account_files(&imported.tool_id, &self.store, &id);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn unique_import_launcher(
+        &self,
+        tool_id: &ToolId,
+        name: &str,
+        account_id: &str,
+    ) -> Result<String> {
+        let slug = name
+            .to_ascii_lowercase()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+            .split('-')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("-");
+        let base = if slug.is_empty() {
+            "imported"
+        } else {
+            slug.as_str()
+        };
+        for index in 1..1000 {
+            let suffix = if index == 1 {
+                String::new()
+            } else {
+                format!("-{index}")
+            };
+            let candidate = format!(
+                "{}{}",
+                base.chars()
+                    .take(40usize.saturating_sub(suffix.len()))
+                    .collect::<String>(),
+                suffix
+            );
+            if let Ok(full) = self.validated_launcher(tool_id, account_id, &candidate) {
+                return Ok(full);
+            }
+        }
+        anyhow::bail!("Couldn't create a unique command for the imported account")
+    }
+
+    fn claude_import_is_duplicate(&self, raw_credentials: &str) -> Result<bool> {
+        use sha2::{Digest, Sha256};
+        let candidate_hash = Sha256::digest(raw_credentials.as_bytes());
+        let candidate_refresh = serde_json::from_str::<serde_json::Value>(raw_credentials)
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/claudeAiOauth/refreshToken")
+                    .and_then(|token| token.as_str())
+                    .map(ToString::to_string)
+            });
+        let data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let default_dir = resolved_default_config_dir(&data, &ToolId::Claude);
+        for account in data
+            .accounts
+            .iter()
+            .filter(|account| account.tool_id == ToolId::Claude && account.api_provider.is_none())
+        {
+            let dir = account_config_dir_with_default(&self.store, account, &default_dir);
+            if let Some(raw) = crate::quota::claude_credentials_blob(&dir) {
+                if Sha256::digest(raw.as_bytes()) == candidate_hash {
+                    return Ok(true);
+                }
+                if let (Some(candidate), Some(current)) = (
+                    candidate_refresh.as_deref(),
+                    serde_json::from_str::<serde_json::Value>(&raw)
+                        .ok()
+                        .and_then(|value| {
+                            value
+                                .pointer("/claudeAiOauth/refreshToken")
+                                .and_then(|token| token.as_str())
+                                .map(ToString::to_string)
+                        }),
+                ) {
+                    if current == candidate {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn api_import_is_duplicate(
+        &self,
+        tool_id: &ToolId,
+        api_key: &str,
+        provider: &ApiProvider,
+    ) -> Result<bool> {
+        let data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let default_dir = resolved_default_config_dir(&data, tool_id);
+        Ok(data
+            .accounts
+            .iter()
+            .filter(|account| account.tool_id == *tool_id && account.api_provider.is_some())
+            .any(|account| {
+                let same_provider = account.api_provider.as_ref().is_some_and(|current| {
+                    current
+                        .base_url
+                        .trim_end_matches('/')
+                        .eq_ignore_ascii_case(provider.base_url.trim_end_matches('/'))
+                        && current.model == provider.model
+                });
+                if !same_provider {
+                    return false;
+                }
+                let dir = account_config_dir_with_default(&self.store, account, &default_dir);
+                let stored_key = if *tool_id == ToolId::Claude {
+                    std::fs::read_to_string(dir.join("settings.json"))
+                        .ok()
+                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                        .and_then(|settings| {
+                            settings
+                                .pointer("/env/ANTHROPIC_AUTH_TOKEN")
+                                .and_then(serde_json::Value::as_str)
+                                .map(ToString::to_string)
+                        })
+                } else {
+                    std::fs::read_to_string(dir.join("api_key")).ok()
+                };
+                stored_key.is_some_and(|key| key.trim() == api_key.trim())
+            }))
     }
 
     /// Blocking core of a manual prime: send one lightweight request, confirm, log the outcome and
@@ -1724,7 +2155,10 @@ impl ManagedState {
         };
 
         // On success, refresh the displayed quota right away so the card shows the new reset.
-        if matches!(outcome, PrimeOutcome::Success { .. } | PrimeOutcome::HelloSentWithoutWindow) {
+        if matches!(
+            outcome,
+            PrimeOutcome::Success { .. } | PrimeOutcome::HelloSentWithoutWindow
+        ) {
             let _ = self.refresh_single_account(&job.tool_id, &job.account_id, app);
         }
 
@@ -1925,17 +2359,37 @@ impl ManagedState {
         self.create_profile_account(app, input)
     }
 
-    pub fn parse_codex_auth(&self, input: crate::models::CodexAuthSourceInput) -> Result<crate::models::CodexAuthPreview> {
+    pub fn parse_codex_auth(
+        &self,
+        input: crate::models::CodexAuthSourceInput,
+    ) -> Result<crate::models::CodexAuthPreview> {
         let (_, auth) = crate::codex_import::load(&input)?;
         let email = crate::quota::codex_account_email_from_auth(&auth);
         let account_id = crate::quota::codex_account_id_from_auth(&auth);
         let user_id = crate::quota::codex_user_id_from_auth(&auth);
-        let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
         let default_dir = resolved_default_config_dir(&data, &ToolId::Codex);
-        let already_added = codex_identity_exists(&self.store, &data, &default_dir, account_id.as_deref(), user_id.as_deref(), email.as_deref());
-        let token_fields = ["access_token", "refresh_token", "id_token", "account_id"].into_iter()
-            .filter(|key| auth["tokens"][*key].as_str().is_some_and(|s| !s.is_empty())).map(str::to_string).collect();
-        Ok(crate::models::CodexAuthPreview { email, already_added, token_fields })
+        let already_added = codex_identity_exists(
+            &self.store,
+            &data,
+            &default_dir,
+            account_id.as_deref(),
+            user_id.as_deref(),
+            email.as_deref(),
+        );
+        let token_fields = ["access_token", "refresh_token", "id_token", "account_id"]
+            .into_iter()
+            .filter(|key| auth["tokens"][*key].as_str().is_some_and(|s| !s.is_empty()))
+            .map(str::to_string)
+            .collect();
+        Ok(crate::models::CodexAuthPreview {
+            email,
+            already_added,
+            token_fields,
+        })
     }
 
     /// Import an existing Codex OAuth auth.json into a new isolated Switcher profile.
@@ -2478,9 +2932,8 @@ impl ManagedState {
                 drop(data);
                 return self.snapshot();
             }
-            let was_active =
-                active_account_id_for(&self.store, tool_id, &data.accounts).as_deref()
-                    == Some(account_id);
+            let was_active = active_account_id_for(&self.store, tool_id, &data.accounts).as_deref()
+                == Some(account_id);
             (account.launcher_command.clone(), was_active)
         };
 
@@ -2582,7 +3035,9 @@ impl ManagedState {
                 anyhow::bail!("This tool has no weekly limit to watch");
             }
             if account.is_default {
-                anyhow::bail!("Can't lock the machine default account — the plain command falls back to it");
+                anyhow::bail!(
+                    "Can't lock the machine default account — the plain command falls back to it"
+                );
             }
             if account.api_provider.is_some() {
                 anyhow::bail!("API accounts have no quota to watch");
@@ -2656,9 +3111,8 @@ impl ManagedState {
                 .iter()
                 .find(|a| a.tool_id == *tool_id && a.id == account_id)
                 .context("Account not found")?;
-            let was_active =
-                active_account_id_for(&self.store, tool_id, &data.accounts).as_deref()
-                    == Some(account_id);
+            let was_active = active_account_id_for(&self.store, tool_id, &data.accounts).as_deref()
+                == Some(account_id);
             let replacement = if was_active {
                 best_replacement(&data.accounts, tool_id, 100.0, Some(account_id))
                     .map(|a| (a.id.clone(), a.is_default))
@@ -3213,9 +3667,9 @@ impl ManagedState {
             // out of quota is marked `Exhausted` while still being the one the plain command uses,
             // and deleting it without clearing the active file leaves that file pointing at a
             // profile dir that no longer exists.
-            let was_active =
-                active_account_id_for(&self.store, &tool_id, &data.accounts).as_deref()
-                    == Some(account_id.as_str());
+            let was_active = active_account_id_for(&self.store, &tool_id, &data.accounts)
+                .as_deref()
+                == Some(account_id.as_str());
             // If this Claude OAuth account was never resolved to its org, remember enough to look
             // it up BEFORE the profile/credentials are removed — the registry then keeps its name
             // for usage the account already produced.
@@ -3432,6 +3886,15 @@ fn codex_identity_exists(
 
 fn write_private_codex_auth(profile: &std::path::Path, contents: &[u8]) -> Result<()> {
     let path = profile.join("auth.json");
+    write_private_new_file(&path, contents)
+}
+
+fn write_private_claude_credentials(profile: &std::path::Path, credentials: &str) -> Result<()> {
+    let path = profile.join(".credentials.json");
+    write_private_new_file(&path, credentials.as_bytes())
+}
+
+fn write_private_new_file(path: &std::path::Path, contents: &[u8]) -> Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -3446,6 +3909,47 @@ fn write_private_codex_auth(profile: &std::path::Path, contents: &[u8]) -> Resul
     file.write_all(contents)?;
     file.sync_all()?;
     Ok(())
+}
+
+fn unique_import_name(tool_id: &ToolId, requested: &str, state: &ManagedState) -> Result<String> {
+    let cleaned = requested
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(20)
+        .collect::<String>()
+        .trim()
+        .to_string();
+    let base = if cleaned.is_empty() {
+        tool_id.display_name().to_string()
+    } else {
+        cleaned
+    };
+    let data = state
+        .data
+        .lock()
+        .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+    let exists = |candidate: &str| {
+        data.accounts.iter().any(|account| {
+            account.tool_id == *tool_id && account.name.eq_ignore_ascii_case(candidate)
+        })
+    };
+    if !exists(&base) && ![virtual_api_name(tool_id)].contains(&base.as_str()) {
+        return Ok(base);
+    }
+    for index in 2..10_000 {
+        let suffix = format!(" ({index})");
+        let candidate = format!(
+            "{}{}",
+            base.chars()
+                .take(20usize.saturating_sub(suffix.chars().count()))
+                .collect::<String>(),
+            suffix
+        );
+        if !exists(&candidate) && ![virtual_api_name(tool_id)].contains(&candidate.as_str()) {
+            return Ok(candidate);
+        }
+    }
+    anyhow::bail!("Couldn't create a unique name for the imported account")
 }
 
 fn resolved_default_config_dir(data: &StoredState, tool_id: &ToolId) -> std::path::PathBuf {
@@ -3820,7 +4324,8 @@ fn active_account_id_for(store: &Store, tool_id: &ToolId, accounts: &[Account]) 
             .iter()
             .find(|account| {
                 !account.hidden
-                    && antigravity_saved_token(store, &account.id).as_deref() == Some(current.as_str())
+                    && antigravity_saved_token(store, &account.id).as_deref()
+                        == Some(current.as_str())
             })
             .map(|account| account.id.clone());
     }
@@ -3894,7 +4399,10 @@ fn supports_weekly_lock(tool_id: &ToolId) -> bool {
 /// A failed or partial quota read never changes the lock.
 fn weekly_lock_transition(account: &Account) -> Option<bool> {
     let lock = account.weekly_lock.as_ref().filter(|lock| lock.enabled)?;
-    let quota = account.quota.as_ref().filter(|quota| quota.error.is_none())?;
+    let quota = account
+        .quota
+        .as_ref()
+        .filter(|quota| quota.error.is_none())?;
     let used = quota.weekly.percent_used?;
     match (lock.locked, used >= lock.threshold) {
         (false, true) => Some(true),
@@ -4232,7 +4740,10 @@ fn notify_weekly_lock(app: &AppHandle, account: &Account, locked: bool) {
     } else {
         (
             "Account unlocked",
-            format!("{}'s weekly quota reset — unlocked and ready to use.", account.name),
+            format!(
+                "{}'s weekly quota reset — unlocked and ready to use.",
+                account.name
+            ),
         )
     };
     let _ = app.notification().builder().title(title).body(&body).show();
@@ -4514,7 +5025,13 @@ mod tests {
     fn upsert_claude_org_adds_account_and_is_idempotent() {
         let mut registry = std::collections::BTreeMap::new();
         let identity = claude_identity("org-1", Some("Acme"), Some("a@x.com"));
-        assert!(upsert_claude_org(&mut registry, &identity, "acc1", "Work", "t1"));
+        assert!(upsert_claude_org(
+            &mut registry,
+            &identity,
+            "acc1",
+            "Work",
+            "t1"
+        ));
         let record = &registry["org-1"];
         assert_eq!(record.account_ids, vec!["acc1".to_string()]);
         assert_eq!(record.account_names, vec!["Work".to_string()]);
@@ -4522,9 +5039,21 @@ mod tests {
         assert_eq!(record.organization_name.as_deref(), Some("Acme"));
         assert_eq!(record.last_seen, "t1");
         // Same data at the same timestamp → nothing to change.
-        assert!(!upsert_claude_org(&mut registry, &identity, "acc1", "Work", "t1"));
+        assert!(!upsert_claude_org(
+            &mut registry,
+            &identity,
+            "acc1",
+            "Work",
+            "t1"
+        ));
         // A fresh lookup only bumps last_seen.
-        assert!(upsert_claude_org(&mut registry, &identity, "acc1", "Work", "t2"));
+        assert!(upsert_claude_org(
+            &mut registry,
+            &identity,
+            "acc1",
+            "Work",
+            "t2"
+        ));
         assert_eq!(registry["org-1"].last_seen, "t2");
         // A partial profile response must not erase the stored email/name.
         let partial = claude_identity("org-1", None, None);
@@ -4538,7 +5067,13 @@ mod tests {
         let mut registry = std::collections::BTreeMap::new();
         let identity = claude_identity("org-1", None, Some("a@x.com"));
         upsert_claude_org(&mut registry, &identity, "acc1", "Old", "t1");
-        assert!(upsert_claude_org(&mut registry, &identity, "acc1", "New", "t2"));
+        assert!(upsert_claude_org(
+            &mut registry,
+            &identity,
+            "acc1",
+            "New",
+            "t2"
+        ));
         assert_eq!(registry["org-1"].account_ids, vec!["acc1".to_string()]);
         assert_eq!(registry["org-1"].account_names, vec!["New".to_string()]);
     }
@@ -4552,7 +5087,13 @@ mod tests {
         upsert_claude_org(&mut registry, &org_b, "acc2", "Other", "t1");
         // acc1 re-logs into org-b: it must leave org-a entirely (one org per account) and join
         // org-b keeping account_ids/account_names aligned by position.
-        assert!(upsert_claude_org(&mut registry, &org_b, "acc1", "Work", "t2"));
+        assert!(upsert_claude_org(
+            &mut registry,
+            &org_b,
+            "acc1",
+            "Work",
+            "t2"
+        ));
         assert!(registry["org-a"].account_ids.is_empty());
         assert!(registry["org-a"].account_names.is_empty());
         assert_eq!(

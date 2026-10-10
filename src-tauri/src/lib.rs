@@ -2,6 +2,7 @@ mod api_gateway;
 mod app_state;
 mod codex_import;
 mod credential_export;
+mod credential_import;
 mod desktop;
 mod desktop_recovery;
 mod desktop_rpc;
@@ -22,12 +23,12 @@ mod wake;
 use app_state::ManagedState;
 use models::{
     AddAccountInput, AddApiAccountInput, ApiUsageReport, AppSnapshot, CreateApiGatewayKeyInput,
-    CreateApiGatewayKeyResult, CreateVirtualApiAccountInput, DeleteApiGatewayComboInput,
-    DeleteApiGatewayKeyInput, DetectionReport, ImportCodexAccountInput, OverlayRect,
-    OverlaySettings, PrimeNowInput, RenameAccountInput, SaveApiGatewayComboInput,
-    SetAccountHiddenInput, SetApiGatewayAccountInput, SetLauncherInput, SetToolSetupInput,
-    SetWeeklyLockInput, StartApiGatewayInput,
-    SwitchAccountInput, ToolId, UsageReport,
+    CreateApiGatewayKeyResult, CreateVirtualApiAccountInput, CredentialsImportPreview,
+    CredentialsImportResult, DeleteApiGatewayComboInput, DeleteApiGatewayKeyInput, DetectionReport,
+    ImportCodexAccountInput, OverlayRect, OverlaySettings, PrimeNowInput, RenameAccountInput,
+    SaveApiGatewayComboInput, SetAccountHiddenInput, SetApiGatewayAccountInput, SetLauncherInput,
+    SetToolSetupInput, SetWeeklyLockInput, StartApiGatewayInput, SwitchAccountInput, ToolId,
+    UsageReport,
 };
 use tauri::{Emitter, Manager, State};
 
@@ -105,9 +106,17 @@ async fn import_codex_account(
 }
 
 #[tauri::command]
-async fn parse_codex_auth(app: tauri::AppHandle, input: models::CodexAuthSourceInput) -> Result<models::CodexAuthPreview, String> {
-    tauri::async_runtime::spawn_blocking(move || app.state::<ManagedState>().parse_codex_auth(input).map_err(display_error))
-        .await.map_err(|e| e.to_string())?
+async fn parse_codex_auth(
+    app: tauri::AppHandle,
+    input: models::CodexAuthSourceInput,
+) -> Result<models::CodexAuthPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<ManagedState>()
+            .parse_codex_auth(input)
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -549,7 +558,9 @@ fn open_quota_panel(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn close_quota_panel(app: tauri::AppHandle) { menubar::hide(&app); }
+fn close_quota_panel(app: tauri::AppHandle) {
+    menubar::hide(&app);
+}
 
 #[tauri::command]
 fn open_main_window(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
@@ -588,6 +599,42 @@ async fn export_credentials(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn preview_credentials_import(
+    app: tauri::AppHandle,
+    path: std::path::PathBuf,
+    tool_id: Option<ToolId>,
+) -> Result<CredentialsImportPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<ManagedState>()
+            .preview_credentials_import(&path, tool_id.as_ref())
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn import_credentials(
+    app: tauri::AppHandle,
+    path: std::path::PathBuf,
+    tool_id: Option<ToolId>,
+) -> Result<CredentialsImportResult, String> {
+    let app2 = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        app2.state::<ManagedState>()
+            .import_credentials(&path, tool_id.as_ref())
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    tray::rebuild(&app);
+    if let Ok(snapshot) = app.state::<ManagedState>().snapshot() {
+        let _ = app.emit("snapshot-changed", snapshot);
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -664,6 +711,8 @@ pub fn run() {
             get_auto_prime_settings,
             set_auto_prime_settings,
             export_credentials,
+            preview_credentials_import,
+            import_credentials,
             set_overlay_settings,
             set_overlay_enabled,
             refresh_tool,
@@ -773,7 +822,9 @@ pub fn run() {
             let prime_handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(60));
-                prime_handle.state::<ManagedState>().auto_prime_tick(&prime_handle);
+                prime_handle
+                    .state::<ManagedState>()
+                    .auto_prime_tick(&prime_handle);
             });
 
             // Background poller: periodically refresh quota + auto-switch if enabled.
@@ -846,7 +897,9 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Resized(size) => {
                     if let Ok(current) = state.overlay_settings() {
-                        if current.minimized { return; }
+                        if current.minimized {
+                            return;
+                        }
                         let logical = size.to_logical::<f64>(scale);
                         let _ = state.set_overlay_rect(OverlayRect {
                             width: logical.width,

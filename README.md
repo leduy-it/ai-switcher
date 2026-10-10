@@ -31,7 +31,7 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/leduy-it/ai
 - **One window for every tool.** Log in, switch, rename, and remove accounts per tool.
 - **Menu-bar quota table.** Click the icon to open a glass table below it: all visible accounts, email, plan, 5-hour and weekly usage. Filter by provider or email, expand each account for reset times, command, read errors and refresh/switch actions. The footer opens the full app or enters full screen. Right-click retains the native quick-switch menu. The top sidebar also opens this dropdown.
 - **Minimizable floating overlay.** Pin quota above your other apps from the dropdown or Settings. Its minus button collapses to a small draggable logo bubble; click the logo to expand. Account rows include email and expandable details.
-- **Credential backups.** Export one provider from its account tab, or all providers from Settings. Private JSON files contain raw credentials (including original Codex `auth.json`), parsed fields, available email, account settings, quota and usage at export time. Hidden accounts are included. Exports contain plaintext tokens/API keys and should be stored privately; missing sources are explicitly noted.
+- **Credential backups.** Settings can export one provider or all providers. Import an exported JSON to append supported Codex and Claude Code OAuth or API / Proxy accounts on another Mac. Choose all supported providers, Claude Code only, or Codex only. The preview shows account metadata only; existing logins are skipped and local accounts are not replaced. Imports do not copy sessions or usage history. Exports contain plaintext tokens/API keys plus account, quota, usage and project-attribution details; store privately and share only with trusted people. Missing sources are explicitly noted.
 - **Quota at a glance.** Reads 5-hour / weekly usage for Claude & Codex and per-model quota for Antigravity, shows your **subscription plan** (Plus / Pro / Max) when the API reports it, and exposes Codex usage-limit reset credits in a per-account modal.
 - **Blue Liquid Glass identity.** A Michael Le Profiles logo, native macOS Liquid Glass window on macOS 26+, and a direct link to [duyle.me](https://duyle.me).
 - **Per-tool auto-switch.** Configure separately for Claude and Codex — the bare command falls back to another account when the active one nears its quota.
@@ -43,6 +43,7 @@ Get the latest **`.dmg`** from the [**Releases**](https://github.com/leduy-it/ai
 
 - Each account logs into its own isolated config dir and gets a **dedicated command** (`claude-<name>`, `codex-<name>`) so you can run several accounts in parallel across terminals.
 - Codex accounts can also be added from an existing OAuth `auth.json`: choose **Paste JSON** and **Parse JSON**, or **Import file**. Parsing checks the local format and required token fields, then previews the email and duplicate status without creating an account or contacting the provider. Import revalidates the source, copies it into a private per-account profile and refreshes its live quota. The selected source file is left untouched; pasted JSON stays in the open dialog until import.
+- From **Settings → Export credentials**, choose **Choose JSON backup** to preview supported accounts and append missing Codex/Claude credentials. Codex tokens and Claude OAuth credentials stay in private destination profiles; Claude OAuth is also stored under its new profile-specific macOS Keychain item. Exact duplicate identities/credentials are skipped. Claude accounts with the same email may belong to different Team/Business organizations, so email alone is not treated as a duplicate. Exported tokens are copied, not synced; providers may rotate refresh tokens, so avoid running copies of one login concurrently on multiple computers.
 - The bare `claude` / `codex` command **follows the account you select** (via a shell hook + an "active profile" file). Run `aisw` in an already-open terminal to sync it to the latest selection.
 - Chat sessions are **shared across accounts** in the same project, so you can resume work regardless of which account created it. Codex OAuth profiles keep their own `CODEX_HOME` and `auth.json`, while their launchers use the documented [`CODEX_SQLITE_HOME`](https://learn.chatgpt.com/docs/config-file/environment-variables) override to share the thread catalog with Codex Desktop. Session rollouts, archived rollouts, prompt history, and `session_index.jsonl` are linked to the default Codex home; existing index rows are merged before linking. API/proxy profiles remain isolated. A user-defined `sqlite_home` setting takes precedence over the environment variable and should point every profile at the same state directory.
 - The Codex shell hook also exports `CODEX_SQLITE_HOME` for subscription profiles, so legacy `CODEX_HOME` aliases inherit the shared session catalog. API/proxy launchers explicitly clear that override.
@@ -146,8 +147,26 @@ HTTP path as manual prime. The app must be running and the Mac awake.
 
 ## Install
 
-1. Download the latest `.dmg` from the [Releases](https://github.com/leduy-it/ai-switcher/releases/latest) page.
-2. Open the `.dmg` and drag **Michael Le Profiles** to Applications.
+### Homebrew
+
+After a GitHub Release is published, add this repository as a tap and install the Cask:
+
+```bash
+brew tap leduy-it/ai-switcher https://github.com/leduy-it/ai-switcher.git
+brew install --cask leduy-it/ai-switcher/michael-le-profiles
+```
+
+To upgrade from a newer release, run:
+
+```bash
+brew upgrade --cask --greedy leduy-it/ai-switcher/michael-le-profiles
+```
+
+The tap uses the latest release asset. If the repository is private, each computer needs GitHub read access. Homebrew does not remove the macOS first-open warning for this unsigned app.
+
+### DMG
+
+Download the latest `.dmg` from the [Releases](https://github.com/leduy-it/ai-switcher/releases/latest) page, open it, and drag **Michael Le Profiles** to Applications.
 
 The app is **not code-signed** (no paid Apple Developer account), so macOS Gatekeeper will warn on first launch. To open it:
 
@@ -172,11 +191,11 @@ npm run tauri build    # produce a .dmg in src-tauri/target/release/bundle/dmg
 
 ## Releasing
 
-Pushing a version tag like `v0.6.3` triggers the GitHub Actions workflow (`.github/workflows/release.yml`), which builds a universal macOS `.dmg` and publishes a GitHub Release with the artifact attached. Bump the version in `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` first, then:
+Pushing a version tag like `v0.15.0` triggers the GitHub Actions workflow (`.github/workflows/release.yml`), which builds a universal macOS `.dmg`, publishes the versioned artifact and adds the stable `michael-le-profiles.dmg` asset used by Homebrew. Bump the version in `package.json`, `package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` first, then:
 
 ```bash
-git tag v0.6.3
-git push origin main v0.6.3
+git tag v0.15.0
+git push origin main v0.15.0
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for the per-version history and

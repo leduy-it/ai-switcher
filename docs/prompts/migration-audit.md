@@ -4,7 +4,7 @@ Read [the requirements](../requirements.md) and [the task index](../../TASKS.md)
 
 Audit [TARGET_APP_OR_REPO] for migration from Michael Le Profiles.
 
-Read the current docs/requirements.md and TASKS.md completely, or their attached copies. Preserve EVERY requirement index and baseline ID in that version (currently 1–22 and B01–B10). Apply the latest decisions: one Michael Le blue Liquid Glass identity, duyle.me reference, original author thanked in docs, support Codex CLI and the local coding backends of both installed desktop brands, keep both dropdown and floating overlay, and offer JSON paste/parse alongside Codex auth.json file import.
+Read the current docs/requirements.md and TASKS.md completely, or their attached copies. Preserve EVERY requirement index and baseline ID in that version (currently 1–24 and B01–B10). Apply the latest decisions: one Michael Le blue Liquid Glass identity, duyle.me reference, original author thanked in docs, support Codex CLI and the local coding backends of both installed desktop brands, keep both dropdown and floating overlay, and offer JSON paste/parse alongside Codex auth.json file import and additive provider backup restore.
 
 This request is an audit. Use read-only inspection. Do not edit files/config, migrate history, copy/export credentials, switch accounts, restart apps, stop sessions, send Hello, submit continuation turns, redeem quota credits, or publish. If a runtime check requires one of those actions, mark it Not verified and state the specific validation needed.
 
@@ -23,6 +23,8 @@ Pay particular attention to:
 - Checkpoint before interruption, original thread/context, confirmed destination identity, acknowledgement/history checks and no blind resend. Exclude completed/user-stopped/inaccessible/unsupported work; continued does not mean completed.
 - Automatic minimal Hello with durable cooldown, provider eligibility, no token rotation and no assumption that weekly-only plans expose a five-hour window.
 - Private versioned provider/all export with raw Codex auth, available email/quota/usage, hidden accounts and explicit missing sources.
+- Additive provider-backup import with metadata-only preview, duplicate handling, Codex/Claude OAuth and API/proxy restore; usage and session history are not restored.
+- DMG/Homebrew install and upgrade workflow, including stable release asset, unsigned-app Gatekeeper state and distinction between local build and published release.
 - Anchored expandable menu-bar table, full-screen/full-app access, pet-like minimizable overlay, blue native glass, responsive usage bars and consistent branding.
 - Additive repeatable old-history migration, private manifest/backups, original metadata and no automatic resumption of restored completed sessions.
 - The installed artifact version may lag source. Inspect both.

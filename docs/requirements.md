@@ -60,6 +60,8 @@ Source implementation, installed-app validation and release publication are sepa
 | 20 | Restore older sessions and their complete paginated history |
 | 21 | Maintain repository requirements, task status and reusable agent prompts |
 | 22 | Paste and parse Codex credential JSON, alongside JSON file import |
+| 23 | Restore Codex and Claude Code accounts additively from a provider backup JSON |
+| 24 | Install and upgrade macOS builds through a DMG or Homebrew |
 
 ## 1 Shared Codex local history
 
@@ -248,11 +250,39 @@ Requirements:
 - Export one provider or all providers from the GUI, including hidden accounts.
 - Include a format/schema version, export timestamp, provider/profile identity, available account email/plan, relevant settings, available quota and usage snapshot with its timestamp.
 - Include raw credential sources and parsed fields, including raw Codex auth.json when available. Preserve provider distinctions and field names needed by a future importer.
+- Omit the source computer's absolute profile directory from shareable backup JSON.
 - Report unavailable credential sources/fields explicitly; do not claim completeness where keychain/provider access was unavailable.
 - Save atomically with private file permissions; do not send raw tokens through frontend state, logs or public documentation.
-- Treat exports as secret-bearing backups. A future migration should validate its importer and secure transfer before moving real credentials.
+- Treat exports as secret-bearing backups. Provider backup restore is specified in requirement 23; export alone does not mean usage or session history can be restored.
 
 Acceptance: an authorized export matches the chosen scope and preserves raw sources plus metadata. The report distinguishes current live data, stale/unknown usage and missing sources. Export support alone does not prove full backup restore support.
+
+## 23 Add provider accounts from a credential backup
+
+Requirements:
+
+- Choose an exported JSON file and show a metadata-only preview. Never return token or API-key values to the webview or write them to logs.
+- Limit imported JSON files to 100 MB and report the size limit before import fails.
+- Restore Codex OAuth, Claude Code OAuth, and Codex/Claude API-proxy profiles from schema version 1 exports. Other provider entries and unavailable or invalid sources are reported as skipped.
+- Append imported profiles to the destination machine. Never replace or reselect an existing local account. Skip exact duplicate Codex identities, exact Claude credential/refresh-token matches, and identical API key + endpoint + model profiles.
+- Preserve provider-specific isolation: Codex `auth.json` and API keys use private profile files; Claude OAuth is written to its destination-specific macOS Keychain item and private profile credential file; Claude API keys remain in private profile settings.
+- Generate destination-local profile IDs and non-conflicting display names/CLI launchers. Do not copy source machine paths, account IDs, session databases, project histories, usage aggregates, quota snapshots or selection state.
+- Re-read and validate the file at import time. Keep the selected file unchanged. Add imported profiles without overwriting local accounts; preview/import is local and does not contact the provider except for the app's normal live quota read after import.
+- Claude email alone is not a duplicate key: one user may have separate Business/Team organizations. If organization identity cannot be verified from local credential material, keep distinct tokens as separate profiles and do not claim they are the same account.
+
+Acceptance: preview a provider/all export without exposing token values; import it to a machine with existing profiles; verify only missing supported credentials are added, local profiles and selection remain intact, destination files have private permissions, and duplicate entries are skipped. Confirm Claude OAuth is available from the new profile's Keychain service. This feature transfers credentials only; it does not copy CLI/Desktop history or usage reports.
+
+## 24 macOS install and upgrade path
+
+Requirements:
+
+- Build the native `.dmg` and offer a Homebrew Cask that installs the app into Applications from the latest GitHub Release asset.
+- Give users concise install and upgrade commands. The Cask uses a `:latest` version, so document `brew upgrade --cask --greedy` for upgrade checks.
+- Each release tag must retain the versioned Tauri artifact and attach a stable `michael-le-profiles.dmg` asset for Homebrew.
+- Keep the app's signing/notarization state clear. When unsigned, explain the first-launch Gatekeeper action; do not imply that Homebrew bypasses it.
+- Track source implementation, locally built artifact and published release separately. A local build does not mean the Homebrew tap or release is published.
+
+Acceptance: install the local universal DMG and confirm the bundled app/version; inspect the Cask and release workflow artifact names; once published, install from the tap and upgrade from a later release using the documented command. This repository's current build remains unsigned and not notarized.
 
 ## 17 Desktop account switching
 
@@ -395,7 +425,7 @@ Before retiring the original app, report every index and baseline ID. Missing em
 
 ## Requirement history and repository evidence
 
-This reference summarizes the owner's requested features and latest decisions. It preserves indices 1–19 from the original task list, adds older-session recovery as 20, maintained repository documentation as 21 and the JSON paste/parse dialog as 22. It summarizes requirements without publishing the private conversation transcript.
+This reference summarizes the owner's requested features and latest decisions. It preserves indices 1–19 from the original task list, adds older-session recovery as 20, maintained repository documentation as 21, the Codex JSON paste/parse dialog as 22, provider backup restore as 23 and the Homebrew/DMG install path as 24. It summarizes requirements without publishing the private conversation transcript.
 
 Use the current TASKS.md, README.md, CHANGELOG.md and implementation files as evidence of support. Associate a relevant file, release, validation result or remaining limitation with task status. Store machine-specific installation checks and private backup manifests outside public documentation when necessary.
 
