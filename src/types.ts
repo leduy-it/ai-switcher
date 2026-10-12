@@ -164,7 +164,7 @@ export interface DesktopRuntime { app: DesktopApp; installed: boolean; running: 
 export interface DesktopSessionView { threadId: string; name: string; cwd: string; phase: string; message: string }
 export interface DesktopOperationView { id: string; phase: string; message: string; targetAccountId: string; sessions: DesktopSessionView[]; updatedAt: string }
 export interface DesktopSyncState { settings: DesktopSyncSettings; lastAppliedAccountId: string | null; lastAppliedAt: string | null; error: string | null; confirmedEmail: string | null; confirmedPlan: string | null; confirmedAt: string | null; operation: DesktopOperationView | null }
-export interface SessionMigrationReport { profiles: number; catalogThreads: number; historyThreads: number; conflicts: number; pendingProjection: number; unavailableRollouts: number; backups: string[] }
+export interface SessionMigrationReport { profiles: number; catalogThreads: number; historyThreads: number; desktopStateProfiles: number; conflicts: number; pendingProjection: number; unavailableRollouts: number; backups: string[] }
 
 export type ApiGatewayServerState = "stopped" | "running" | "errored";
 export type ApiPoolAccountState = "available" | "exhausted" | "coolingDown" | "errored" | "excluded";

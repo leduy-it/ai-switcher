@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.1 — Keep desktop chats visible across credential switches
+
+- Recover projectless chat IDs, workspace/output hints and project/sidebar records before applying
+  a different Codex subscription profile. Merge old copies saved by earlier versions instead of
+  discarding their desktop placement records when the conversation history is restored.
+- Replace the desktop-state symlink with a private regular snapshot prepared after the desktop
+  exits normally. Codex's atomic state saves can no longer sever the handoff's sharing mechanism.
+  Credentials stay in their original profiles.
+- Back up and reset only the incoming desktop's local catalog scan watermark so restored chats with
+  older timestamps appear in its list. Preserve other hosts, inboxes, automations and conversation
+  history. Reapplying the same account refreshes a desktop missing shared sidebar records.
+- Report recovered sidebar records in the session-repair result and explain when to reapply the
+  desktop account after active work finishes. Active desktops are not edited or restarted by repair.
+- Add regression checks for an atomic-save round trip, legacy backups, credential isolation,
+  repeatable merges and local-only desktop catalog refresh. Bump package/Tauri/Rust to 0.15.1.
+
 ## 0.15.0 — Credential backup import and Homebrew install
 
 - Add a metadata-only preview and additive restore flow for provider JSON backups. Codex and Claude

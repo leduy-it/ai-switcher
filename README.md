@@ -5,7 +5,7 @@ A macOS app for managing and switching accounts for Claude Code, Codex, and Anti
 ## Install
 
 - **DMG:** [Download the latest release](https://github.com/leduy-it/ai-switcher/releases/latest) and drag the app to Applications. On first launch, Control-click the app and choose **Open**; it is not signed or notarized.
-- **Homebrew:** Available after the v0.15.0 release is published.
+- **Homebrew:**
 
   ```sh
   brew tap leduy-it/ai-switcher https://github.com/leduy-it/ai-switcher.git
@@ -26,5 +26,3 @@ A macOS app for managing and switching accounts for Claude Code, Codex, and Anti
 - [User guide](docs/user-guide.md) — setup and feature details.
 - [Changelog](CHANGELOG.md) — release-by-release changes.
 - [Requirements and migration notes](docs/requirements.md)
-
-The v0.15.0 source is on `main`; Homebrew installation requires its release asset to be published.

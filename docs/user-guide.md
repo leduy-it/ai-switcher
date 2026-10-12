@@ -87,6 +87,11 @@ store. The main `.codex` catalog and project/sidebar state are shared for local 
   Codex live read stays visible; shared session logs are never substituted as another account's quota.
 - **Recover missing local sessions** scans known OAuth profiles, including hidden originals, and
   adds absent local thread catalog entries and complete absent paginated histories to the main home.
+- In 0.15.1, repair also recovers projectless chat IDs and desktop workspace/project placement
+  records, including copies retained by earlier versions. If sidebar records were recovered, finish
+  active desktop work and reapply the desktop account to refresh the chat list. Handoffs merge the
+  outgoing state after normal quit, prepare a private regular snapshot for the incoming profile,
+  and refresh its local catalog scan; desktop atomic saves no longer break a shared-state symlink.
   The handoff also runs this repair before reopening a desktop. SQLite creates consistent snapshots
   including committed WAL data; backups live under the main home's `backups/session-catalog-migration-*`
   with private permissions. Existing records/cursors are never replaced. Partial history conflicts,

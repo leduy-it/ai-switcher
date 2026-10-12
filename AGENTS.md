@@ -118,6 +118,10 @@
   snapshots and private backups. Never replace existing threads or projection cursors, symlink
   live databases, or import enrollments/auth/daemon tables. Partial histories and unknown schemas
   need attention. Preserve the previously restored morning chats; do not continue completed work.
+- `desktop_state.rs` merges missing desktop placement records and legacy state backups. Prepare
+  the incoming profile's regular state snapshot only after normal desktop exit; native atomic saves
+  replace symlinks. Refresh only its local desktop catalog scan with a consistent private backup.
+  Never share credentials, symlink SQLite files, or overwrite a live desktop's in-memory state.
 
 - `src/App.tsx` is the main UI: tool tabs, account cards, modals, auto-switch settings.
 - `src/UsageView.tsx` renders token/cost usage.

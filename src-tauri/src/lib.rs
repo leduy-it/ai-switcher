@@ -6,6 +6,7 @@ mod credential_import;
 mod desktop;
 mod desktop_recovery;
 mod desktop_rpc;
+mod desktop_state;
 mod detection;
 mod menubar;
 mod models;

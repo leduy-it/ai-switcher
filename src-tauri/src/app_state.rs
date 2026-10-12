@@ -3356,7 +3356,7 @@ impl ManagedState {
         };
         let mut result = crate::session_migration::Report::default();
         for profile in profiles {
-            if profile == shared || !profile.join("state_5.sqlite").exists() {
+            if profile == shared || !profile.is_dir() {
                 continue;
             }
             // Use each dormant catalog's own SQLite snapshot. Leave a live source alone until its
@@ -3373,6 +3373,9 @@ impl ManagedState {
                         .any(|t| t["status"]["type"] == "active"),
                     "A source profile is busy. Finish its work before repairing session catalogs"
                 );
+            }
+            if crate::desktop_state::merge_profile(&profile, &shared)? {
+                result.desktop_state_profiles += 1;
             }
             link_shared_sessions_to(&ToolId::Codex, &profile, &shared);
             result.include(crate::session_migration::migrate(&profile, &shared)?);
@@ -3446,10 +3449,20 @@ impl ManagedState {
                         && r.profile_home.as_deref() == Some(profile.as_path())
                         && r.session_home.as_deref() == Some(shared.as_path())
                 });
-                if already_running && self.verify_desktop_identity(&profile, &account.id).is_ok() {
+                let needs_refresh = migration.catalog_threads > 0
+                    || crate::desktop_state::needs_refresh(&profile, &shared)?;
+                if already_running && !needs_refresh && self.verify_desktop_identity(&profile, &account.id).is_ok() {
                     Ok(())
                 } else {
-                    crate::desktop::apply(&settings, &profile, &shared, false)
+                    let state_profiles = {
+                        let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+                        data.accounts.iter()
+                            .filter(|a| a.tool_id == ToolId::Codex && a.api_provider.is_none())
+                            .map(|a| account_config_dir_with_default(&self.store, a, &shared))
+                            .filter(|p| p.is_dir())
+                            .collect::<Vec<_>>()
+                    };
+                    crate::desktop::apply(&settings, &profile, &shared, false, &state_profiles)
                         .and_then(|_| self.verify_desktop_identity(&profile, &account.id))
                 }
             })()

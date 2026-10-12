@@ -71,11 +71,18 @@ Requirements:
 - Normal OAuth profiles share session rollouts, archived sessions, prompt history and the merged session index with the main store.
 - CLI, desktop and backend use the same thread catalog. In the current implementation CODEX_HOME selects credentials and CODEX_SQLITE_HOME selects the common catalog. A config-level override must be accounted for.
 - Preserve project/sidebar state as well as thread titles, thread IDs, timestamps, creator identity, archived/pinned state and paginated turn/item history.
+- Desktop state must survive atomic saves that replace files. Merge missing projectless chat IDs,
+  project placements and workspace/output hints into the shared desktop state, then prepare a
+  regular private copy for the incoming profile after the outgoing desktop has exited normally.
+  Do not depend on a symlink for `.codex-global-state.json` or overwrite a live desktop's memory.
+- Refresh the incoming desktop's local catalog scan when necessary so restored chats with their
+  original timestamps appear in the sidebar, even if they predate its incremental watermark.
+  Preserve other hosts, inboxes and automations; keep credentials profile-local.
 - Keep profile credentials separate. Keep API/proxy configuration separate where it has provider-specific keys, models or gateways.
 - Merge old profile catalogs before redirecting them; linking the session directory alone does not restore every catalog/history entry.
 - Do not symlink live SQLite files. Use supported storage overrides and consistent, schema-aware database migration.
 
-Acceptance: create or select known local threads using two OAuth profiles and inspect them in CLI and Desktop. Their IDs, older pages and archived history must remain reachable after switching. Include existing threads from before migration. Perform live switching only in an authorized validation window.
+Acceptance: create or select known local threads using two OAuth profiles and inspect them in CLI and Desktop. Their IDs, older pages and archived history must remain reachable after switching. Include existing threads from before migration and chats outside projects. Simulate a desktop atomic save, switch back and verify those chats remain listed. Verify that a local cache refresh leaves remote hosts and automations unchanged. Perform live switching only in an authorized validation window.
 
 ## 2 Codex auth import
 
@@ -340,6 +347,10 @@ Requirements:
 - Use consistent SQLite snapshots/backups and schema/capability checks. Avoid copying live database files as if they were a complete backup.
 - Make migration additive and repeatable. Do not overwrite valid current history, regenerate completed turns or send continuation prompts to restored completed threads.
 - Record a private manifest of sources, destinations, inserted/skipped/conflicting entries, counts and backup/rollback locations.
+- Recover desktop placement metadata from current profile files and copies retained by older
+  desktop-sharing code, including profiles whose backend catalog already uses the shared store.
+  Report recovered sidebar state separately from imported catalog/history rows. Explain that the
+  user should finish active work and reapply the desktop account to refresh its chat list.
 - Verify old history pages and archive access after redirection.
 - Provide a GUI repair action for known OAuth profile catalogs, including hidden originals. Check
   that source backends are idle, resolve their short socket symlinks and use SQLite-managed WAL

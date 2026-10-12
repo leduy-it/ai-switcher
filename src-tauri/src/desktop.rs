@@ -206,6 +206,7 @@ pub fn apply(
     profile: &Path,
     shared: &Path,
     api: bool,
+    state_profiles: &[PathBuf],
 ) -> Result<()> {
     #[cfg(not(target_os = "macos"))]
     anyhow::bail!("Desktop switching currently supports macOS");
@@ -229,12 +230,14 @@ pub fn apply(
             .filter(|(_, path)| paths.contains(path))
             .map(|(pid, _)| pid)
             .collect();
+        let mut outgoing_homes = Vec::new();
         for runtime in runtime().into_iter().filter(|r| r.running) {
             let home = runtime.profile_home.context(
                 "Desktop profile is unknown; finish its work and quit it before applying",
             )?;
             let mut client = crate::desktop_rpc::Client::connect(&home)?;
             anyhow::ensure!(!client.threads()?.iter().any(|t| t["status"]["type"] == "active"), "New work started before the handoff. Desktop was left running; retry at a safe point");
+            outgoing_homes.push(home);
         }
         for pid in &pids {
             // Recheck executable immediately before requesting normal application quit.
@@ -262,6 +265,12 @@ pub fn apply(
             );
             std::thread::sleep(Duration::from_millis(200));
         }
+        // Reconcile again after quit: a desktop running from the main home may have flushed its
+        // in-memory state over the earlier repair. Include every OAuth home and its legacy copies.
+        outgoing_homes.extend_from_slice(state_profiles);
+        outgoing_homes.sort();
+        outgoing_homes.dedup();
+        crate::desktop_state::prepare_handoff(&outgoing_homes, profile, shared)?;
         let session_home = if api { profile } else { shared };
         // A CLI daemon can outlive its desktop and keep an old SQLite home in memory. Restart
         // only the selected profile's backend when its catalog location is wrong.

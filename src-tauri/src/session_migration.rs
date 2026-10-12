@@ -15,6 +15,7 @@ pub struct Report {
     pub profiles: usize,
     pub catalog_threads: usize,
     pub history_threads: usize,
+    pub desktop_state_profiles: usize,
     pub conflicts: usize,
     pub pending_projection: usize,
     pub unavailable_rollouts: usize,
@@ -25,6 +26,7 @@ impl Report {
         self.profiles += other.profiles;
         self.catalog_threads += other.catalog_threads;
         self.history_threads += other.history_threads;
+        self.desktop_state_profiles += other.desktop_state_profiles;
         self.conflicts += other.conflicts;
         self.pending_projection += other.pending_projection;
         self.unavailable_rollouts += other.unavailable_rollouts;
@@ -38,7 +40,7 @@ fn literal(value: &str) -> String {
 fn identifier(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
-fn sql(db: &Path, statement: &str, readonly: bool) -> Result<Vec<Value>> {
+pub(crate) fn sql(db: &Path, statement: &str, readonly: bool) -> Result<Vec<Value>> {
     anyhow::ensure!(
         db.is_file(),
         "Session database is missing; initialize it in its original desktop before repair"
@@ -129,7 +131,7 @@ fn copy_columns(source: &Path, target: &Path, table: &str) -> Result<String> {
         .collect::<Vec<_>>()
         .join(","))
 }
-fn private_directory(path: &Path) -> Result<()> {
+pub(crate) fn private_directory(path: &Path) -> Result<()> {
     std::fs::create_dir_all(path)?;
     #[cfg(unix)]
     {
@@ -151,7 +153,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     out.sync_all()?;
     Ok(())
 }
-fn backup(source: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn backup(source: &Path, destination: &Path) -> Result<()> {
     anyhow::ensure!(
         !destination.exists(),
         "Private backup path already exists; it was not replaced"

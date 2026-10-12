@@ -28,6 +28,9 @@ Pay particular attention to:
 - Anchored expandable menu-bar table, full-screen/full-app access, pet-like minimizable overlay, blue native glass, responsive usage bars and consistent branding.
 - Additive repeatable old-history migration, private manifest/backups, original metadata and no automatic resumption of restored completed sessions.
 - The installed artifact version may lag source. Inspect both.
+- Inspect desktop sidebar state independently of backend history: projectless chat IDs, workspace
+  hints, atomic-save behavior and the desktop's profile-local catalog scan watermark. A session
+  present in the shared backend database is not proof that it appears in the desktop chat list.
 - The destination repository must keep its requirements, indexed task status and reusable prompts updated in the same change as relevant implementation work.
 
 Conclude with:
