@@ -19,7 +19,7 @@ and release delivery; document remaining limitations and evidence with the corre
 | 8 | Michael Le (duyle) identity, blue logo/theme and duyle.me link | Implemented; original author thanked in documentation |
 | 9 | Update version, build, install and show the macOS app | 0.15.2 frontend and universal macOS build passed; seven focused Rust regressions and seven isolated subprocess scenarios passed. Installed and relaunched 0.15.2 with accounts/settings preserved; main desktop stayed running. Live desktop handoff was not exercised |
 | 10 | Native Liquid Glass, responsive UI, CSS and usage bars | Implemented |
-| 11 | GitHub authentication, push and merge into the user's fork | Fork authentication configured; 0.15.2 patch prepared for main and the tagged release. Earlier 0.14.0 work remains recorded in PR #4 |
+| 11 | GitHub authentication, push and merge into the user's fork | Fork authentication configured; 0.15.2 patch tracked in [PR #6](https://github.com/leduy-it/ai-switcher/pull/6) for main and the [tagged release](https://github.com/leduy-it/ai-switcher/releases/tag/v0.15.2). Earlier 0.14.0 work remains recorded in PR #4 |
 | 12 | List prior prompts and explain macOS refresh/install steps | Answered in the development chat |
 | 13 | Dropdown table below the menu-bar icon; expand each account; full-screen UI | Implemented |
 | 14 | Keep the floating overlay, improve its details and minimize like a pet | Implemented; draggable logo bubble and one-click expansion |
@@ -32,7 +32,7 @@ and release delivery; document remaining limitations and evidence with the corre
 | 21 | Maintain all requirements, task status and reusable migration prompts in this repository | Implemented; living specification, audit/implementation prompts and an AGENTS.md rule require updates alongside relevant changes |
 | 22 | Paste and parse Codex credential JSON, alongside JSON file import | Implemented since 0.14.0 and included in installed 0.15.2; email/field-name preview, local format validation and duplicate checks before import. Production/native builds and Rust check passed; no real credential import or native GUI inspection performed |
 | 23 | Import provider/all credential-backup JSON additively | Implemented in source for Codex/Claude OAuth and Codex/Claude API-proxy profiles; provider-scoped metadata-only preview, duplicate skip, destination-local profiles and private credentials. Production frontend build, Rust check and universal macOS build passed; no real credential import/Keychain write performed |
-| 24 | Simplify macOS install and upgrades with DMG and Homebrew | Universal 0.15.2 DMG built and verified; installed and relaunched locally. Versioned/stable release assets prepared; Cask and release workflow retained. Homebrew installation/audit was not exercised |
+| 24 | Simplify macOS install and upgrades with DMG and Homebrew | Universal 0.15.2 DMG built and verified; installed and relaunched locally. Versioned/stable assets distributed through the [0.15.2 release](https://github.com/leduy-it/ai-switcher/releases/tag/v0.15.2); Cask and release workflow retained. Homebrew installation/audit was not exercised |
 
 Automatic Hello requires the app to remain running and the computer to be awake. It spends a small
 amount of quota and only attempts a new five-hour window when live provider state allows it. Provider
