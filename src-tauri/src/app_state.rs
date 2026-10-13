@@ -3508,7 +3508,11 @@ impl ManagedState {
             .context("Profile has no email to verify desktop identity")?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         let mut client = loop {
-            match crate::desktop_rpc::Client::connect(profile) {
+            let connection = crate::desktop::runtime().iter()
+                .find(|r| r.running && r.profile_home.as_deref() == Some(profile))
+                .context("Selected desktop is no longer running")
+                .and_then(crate::desktop_rpc::Client::connect_desktop);
+            match connection {
                 Ok(client) => break client,
                 Err(error) if std::time::Instant::now() >= deadline => return Err(error),
                 Err(_) => std::thread::sleep(std::time::Duration::from_millis(400)),

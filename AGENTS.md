@@ -105,6 +105,9 @@
 - `desktop.rs`, `desktop_rpc.rs` and `desktop_recovery.rs` manage explicit local desktop handoffs.
   Desktop and CLI selection are separate statuses. Never infer desktop identity from auth.json;
   verify the launched profile and the running backend's account/read email/workspace.
+- Resolve the desktop-owned bundled app-server process, not an arbitrary daemon sharing its home.
+  Daemon PID records may be JSON. Reject control of a private desktop through an unrelated CLI
+  daemon; isolated subprocess tests do not validate native client-owned tool continuation.
 - Default handoffs wait for active turns. Unknown/unmanaged desktop execution homes wait until
   closed. Do not force-quit apps, interrupt unrelated CLI sessions, or reconstruct ephemeral/cloud
   or native client-owned tool runtimes. Native brands share one desktop data folder, so run one

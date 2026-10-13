@@ -574,6 +574,8 @@ pub struct DesktopRuntime {
     pub installed: bool,
     pub running: bool,
     pub pid: Option<i32>,
+    pub backend_pid: Option<i32>,
+    pub uses_daemon_proxy: bool,
     pub profile_home: Option<std::path::PathBuf>,
     pub session_home: Option<std::path::PathBuf>,
 }

@@ -28,6 +28,34 @@ fn executable(app: &DesktopApp) -> PathBuf {
     })
 }
 
+fn backend_executable(app: &DesktopApp) -> PathBuf {
+    bundle(app).join(match app {
+        DesktopApp::Codex => "Contents/Resources/codex",
+        DesktopApp::Chatgpt => "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+    })
+}
+
+#[derive(Clone)]
+struct Process {
+    pid: i32,
+    parent: i32,
+    executable: PathBuf,
+}
+
+fn process_records() -> Vec<Process> {
+    let Ok(output) = Command::new("/bin/ps").args(["-ax", "-o", "pid=,ppid=,comm="]).output() else {
+        return vec![];
+    };
+    String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| {
+        let line = line.trim();
+        let first = line.find(char::is_whitespace)?;
+        let pid = line[..first].parse().ok()?;
+        let rest = line[first..].trim();
+        let second = rest.find(char::is_whitespace)?;
+        Some(Process { pid, parent: rest[..second].parse().ok()?, executable: rest[second..].trim().into() })
+    }).collect()
+}
+
 pub fn open_thread(app: &DesktopApp, id: &str) -> Result<()> {
     uuid::Uuid::parse_str(id).context("Invalid session ID")?;
     // Opening history must not start another brand over the same live desktop data folder.
@@ -48,25 +76,19 @@ pub fn open_thread(app: &DesktopApp, id: &str) -> Result<()> {
 }
 
 fn processes() -> Vec<(i32, PathBuf)> {
-    let Ok(output) = Command::new("/bin/ps")
-        .args(["-ax", "-o", "pid=,comm="])
-        .output()
-    else {
-        return vec![];
-    };
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let end = line.find(char::is_whitespace)?;
-            Some((line[..end].parse().ok()?, PathBuf::from(line[end..].trim())))
-        })
-        .collect()
+    process_records().into_iter().map(|p| (p.pid, p.executable)).collect()
+}
+
+#[derive(Clone)]
+struct Launch {
+    paths: BTreeMap<String, PathBuf>,
+    app_server: bool,
+    daemon_proxy: bool,
 }
 
 /// Read only the two non-secret launch paths. Never expose/log the process environment.
 #[cfg(target_os = "macos")]
-fn launch_paths(pid: i32) -> Option<BTreeMap<String, PathBuf>> {
+fn launch_info(pid: i32) -> Option<Launch> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
     let mut size = 0usize;
     unsafe {
@@ -104,8 +126,16 @@ fn launch_paths(pid: i32) -> Option<BTreeMap<String, PathBuf>> {
         while bytes.get(cursor) == Some(&0) {
             cursor += 1;
         }
+        let mut app_server = false;
+        let mut daemon_proxy = false;
+        let mut previous_app_server = false;
         for _ in 0..argc {
-            cursor += bytes.get(cursor..)?.iter().position(|b| *b == 0)? + 1;
+            let length = bytes.get(cursor..)?.iter().position(|b| *b == 0)?;
+            let arg = &bytes[cursor..cursor + length];
+            daemon_proxy |= previous_app_server && arg == b"proxy";
+            previous_app_server = arg == b"app-server";
+            app_server |= previous_app_server;
+            cursor += length + 1;
         }
         let mut paths = BTreeMap::new();
         for entry in bytes.get(cursor..)?.split(|b| *b == 0) {
@@ -118,13 +148,38 @@ fn launch_paths(pid: i32) -> Option<BTreeMap<String, PathBuf>> {
                 }
             }
         }
-        Some(paths)
+        Some(Launch { paths, app_server, daemon_proxy })
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn launch_paths(_pid: i32) -> Option<BTreeMap<String, PathBuf>> {
+fn launch_info(_pid: i32) -> Option<Launch> {
     None
+}
+
+fn launch_paths(pid: i32) -> Option<BTreeMap<String, PathBuf>> {
+    launch_info(pid).map(|launch| launch.paths)
+}
+
+fn owned_backend(parent: i32, expected: &Path, records: &[Process], read: impl Fn(i32) -> Option<Launch>) -> Option<(i32, Launch)> {
+    let mut matches = records.iter().filter(|p| p.parent == parent && p.executable == expected)
+        .filter_map(|p| read(p.pid).filter(|info| info.app_server).map(|info| (p.pid, info)));
+    let first = matches.next()?;
+    // Multiple candidates require an explicit owner; never guess which process has active work.
+    if matches.next().is_some() { return None; }
+    Some(first)
+}
+
+pub(crate) fn daemon_pid(home: &Path) -> Option<i32> {
+    let raw = std::fs::read_to_string(home.join("app-server-daemon/daemon.pid")).ok()?;
+    parse_daemon_pid(&raw)
+}
+
+fn parse_daemon_pid(raw: &str) -> Option<i32> {
+    let pid = raw.trim().parse::<i32>().ok().or_else(|| {
+        serde_json::from_str::<serde_json::Value>(raw).ok()?.get("pid")?.as_i64()?.try_into().ok()
+    })?;
+    (pid > 0).then_some(pid)
 }
 
 pub fn validate_catalog_config(profile: &Path, shared: &Path) -> Result<()> {
@@ -144,28 +199,33 @@ pub fn validate_catalog_config(profile: &Path, shared: &Path) -> Result<()> {
 }
 
 pub fn runtime() -> Vec<DesktopRuntime> {
-    let processes = processes();
+    let processes = process_records();
     [DesktopApp::Codex, DesktopApp::Chatgpt]
         .into_iter()
         .flat_map(|app| {
             let path = executable(&app);
             let pids: Vec<_> = processes
                 .iter()
-                .filter(|(_, p)| *p == path)
-                .map(|(pid, _)| *pid)
+                .filter(|p| p.executable == path)
+                .map(|p| p.pid)
                 .collect();
             let pids: Vec<Option<i32>> = if pids.is_empty() {
                 vec![None]
             } else {
                 pids.into_iter().map(Some).collect()
             };
+            let backend = backend_executable(&app);
+            let processes = processes.clone();
             pids.into_iter().map(move |pid| {
-                let paths = pid.and_then(launch_paths);
+                let owned = pid.and_then(|pid| owned_backend(pid, &backend, &processes, launch_info));
+                let paths = owned.as_ref().map(|(_, info)| info.paths.clone()).or_else(|| pid.and_then(launch_paths));
                 DesktopRuntime {
                     installed: path.exists(),
                     app: app.clone(),
                     running: pid.is_some(),
                     pid,
+                    backend_pid: owned.as_ref().map(|(pid, _)| *pid),
+                    uses_daemon_proxy: owned.as_ref().is_some_and(|(_, info)| info.daemon_proxy),
                     profile_home: paths.as_ref().and_then(|p| p.get("CODEX_HOME").cloned()),
                     session_home: paths
                         .as_ref()
@@ -181,8 +241,7 @@ pub fn backend_requires_restart(profile: &Path, shared: &Path) -> bool {
 }
 
 pub fn backend_catalog_home(profile: &Path) -> Option<PathBuf> {
-    let raw = std::fs::read_to_string(profile.join("app-server-daemon/daemon.pid")).ok()?;
-    let pid = raw.trim().parse().ok()?;
+    let pid = daemon_pid(profile)?;
     if !processes()
         .iter()
         .any(|(p, path)| *p == pid && path.file_name().is_some_and(|n| n == "codex"))
@@ -232,10 +291,10 @@ pub fn apply(
             .collect();
         let mut outgoing_homes = Vec::new();
         for runtime in runtime().into_iter().filter(|r| r.running) {
-            let home = runtime.profile_home.context(
+            let home = runtime.profile_home.clone().context(
                 "Desktop profile is unknown; finish its work and quit it before applying",
             )?;
-            let mut client = crate::desktop_rpc::Client::connect(&home)?;
+            let mut client = crate::desktop_rpc::Client::connect_desktop(&runtime)?;
             anyhow::ensure!(!client.threads()?.iter().any(|t| t["status"]["type"] == "active"), "New work started before the handoff. Desktop was left running; retry at a safe point");
             outgoing_homes.push(home);
         }
@@ -274,8 +333,7 @@ pub fn apply(
         let session_home = if api { profile } else { shared };
         // A CLI daemon can outlive its desktop and keep an old SQLite home in memory. Restart
         // only the selected profile's backend when its catalog location is wrong.
-        if let Ok(raw_pid) = std::fs::read_to_string(profile.join("app-server-daemon/daemon.pid")) {
-            if let Ok(pid) = raw_pid.trim().parse::<i32>() {
+        if let Some(pid) = daemon_pid(profile) {
                 if let Some(paths) = launch_paths(pid) {
                     let home = paths.get("CODEX_HOME").cloned().unwrap_or_else(|| {
                         crate::tools::default_config_dir(&crate::models::ToolId::Codex)
@@ -319,7 +377,6 @@ pub fn apply(
                         }
                     }
                 }
-            }
         }
         let user_data = crate::tools::home_dir().join("Library/Application Support/Codex");
         std::fs::create_dir_all(&user_data)?;
@@ -364,5 +421,47 @@ pub fn apply(
             anyhow::ensure!(Instant::now() < deadline, "Desktop launched, but its profile could not be verified. Check the desktop account menu before using it");
             std::thread::sleep(Duration::from_millis(250));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_legacy_and_current_daemon_pid_records() {
+        assert_eq!(parse_daemon_pid("123\n"), Some(123));
+        assert_eq!(parse_daemon_pid(r#"{"pid":456,"processIdentity":{"uniqueId":789}}"#), Some(456));
+        for invalid in ["0", "-1", "null", "{}", r#"{"pid":2147483648}"#, r#"{"pid":"456"}"#] {
+            assert_eq!(parse_daemon_pid(invalid), None);
+        }
+    }
+
+    #[test]
+    fn discovers_only_the_frontends_owned_app_server() {
+        let expected = PathBuf::from("/fixture/bundled/codex");
+        let records = vec![
+            Process { pid: 11, parent: 10, executable: expected.clone() },
+            Process { pid: 12, parent: 10, executable: expected.clone() },
+            Process { pid: 13, parent: 1, executable: expected.clone() },
+        ];
+        let read = |pid| Some(Launch {
+            paths: BTreeMap::from([("CODEX_HOME".into(), PathBuf::from("/fixture/profile"))]),
+            app_server: pid != 12, daemon_proxy: false,
+        });
+        let (pid, info) = owned_backend(10, &expected, &records, read).unwrap();
+        assert_eq!(pid, 11);
+        assert_eq!(info.paths["CODEX_HOME"], PathBuf::from("/fixture/profile"));
+        assert!(owned_backend(99, &expected, &records, read).is_none());
+    }
+
+    #[test]
+    fn ambiguous_desktop_backends_are_not_guessed() {
+        let expected = PathBuf::from("/fixture/bundled/codex");
+        let records = vec![Process { pid: 11, parent: 10, executable: expected.clone() },
+                           Process { pid: 12, parent: 10, executable: expected.clone() }];
+        assert!(owned_backend(10, &expected, &records, |_| Some(Launch {
+            paths: BTreeMap::new(), app_server: true, daemon_proxy: true,
+        })).is_none());
     }
 }

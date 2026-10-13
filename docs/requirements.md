@@ -298,6 +298,9 @@ Requirements:
 - Offer Codex.app and ChatGPT.app as separate launch targets where their installed local coding backends are supported.
 - Provide Apply desktop and an opt-in apply-on-selection setting.
 - Detect actual runtime profile/catalog paths; compare desired identity with the running backend’s account identity, email and workspace.
+- Inspect the desktop-owned bundled app-server child when the GUI process omits profile environment
+  variables. Support numeric and JSON daemon PID metadata. Do not treat a separate CLI daemon as
+  the desktop's private backend; inability to control that backend must remain explicit.
 - Wait for active work by default. Use normal macOS quit and a controlled relaunch, with explicit profile/catalog and desktop-data paths.
 - Preserve session/sidebar/project state. Never copy or symlink auth.json into a shared credential location to perform a handoff.
 - If two installed brands share the same live data directory, use one at a time and disclose that limitation.
@@ -334,6 +337,10 @@ Requirements:
 - Do not automatically resume completed work, a user-stopped/resumed session, pending approvals, inaccessible cloud work, ephemeral sessions or unsupported client-owned tool runtimes. Uncertain external effects need attention.
 - Show waiting, checkpointing, switching, restoring, continuation acknowledged and error states per session. Provide cancellation while waiting, original-session access and safe retry.
 - Continuation acknowledgement is not task completion; terminal/RAM state is not promised restored.
+- Validate restart/continuation in isolated subprocesses with synthetic credentials and a local
+  provider before testing a real desktop. Verify credential identity, same thread ID, interruption,
+  continuation and retry acknowledgement; never use these backend checks as proof that native
+  desktop-owned tools can be recovered. Keep the user's main desktop and credentials untouched.
 
 Acceptance: an authorized validation on a disposable eligible session retains thread ID/context, sends at most one continuation and does not interfere with another session. Unsupported cases fail visibly without duplicate actions.
 

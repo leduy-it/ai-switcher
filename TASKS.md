@@ -17,22 +17,22 @@ and release delivery; document remaining limitations and evidence with the corre
 | 6 | Quick quota access from the sidebar and richer full app | Implemented; sidebar now opens the menu-bar table |
 | 7 | Give quota-reset credits a distinct icon from refresh | Implemented |
 | 8 | Michael Le (duyle) identity, blue logo/theme and duyle.me link | Implemented; original author thanked in documentation |
-| 9 | Update version, build, install and show the macOS app | 0.15.1 frontend and universal macOS build passed; three focused regressions passed. The installed Profiles app is unchanged until the release is installed; live desktop handoff was not exercised |
+| 9 | Update version, build, install and show the macOS app | 0.15.2 frontend and universal macOS build passed; seven focused Rust regressions and seven isolated subprocess scenarios passed. Installed and relaunched 0.15.2 with accounts/settings preserved; main desktop stayed running. Live desktop handoff was not exercised |
 | 10 | Native Liquid Glass, responsive UI, CSS and usage bars | Implemented |
-| 11 | GitHub authentication, push and merge into the user's fork | Fork authentication configured; 0.15.1 patch committed to main and delivered in the [tagged release](https://github.com/leduy-it/ai-switcher/releases/tag/v0.15.1). Earlier 0.14.0 work remains recorded in PR #4 |
+| 11 | GitHub authentication, push and merge into the user's fork | Fork authentication configured; 0.15.2 patch prepared for main and the tagged release. Earlier 0.14.0 work remains recorded in PR #4 |
 | 12 | List prior prompts and explain macOS refresh/install steps | Answered in the development chat |
 | 13 | Dropdown table below the menu-bar icon; expand each account; full-screen UI | Implemented |
 | 14 | Keep the floating overlay, improve its details and minimize like a pet | Implemented; draggable logo bubble and one-click expansion |
 | 15 | Automate a small Hello for eligible Pro/Team/Business accounts | Implemented; app-local scheduler, existing tokens, durable cooldown |
 | 16 | Export credentials by provider or all, raw Codex auth, email and usage | Implemented; private JSON export with unavailable-source notes |
-| 17 | Apply the selected account to Codex.app and ChatGPT.app; confirm desktop identity separately | Implemented; queued controlled handoff and local backend identity verification. Existing unmanaged desktops wait until closed |
+| 17 | Apply the selected account to Codex.app and ChatGPT.app; confirm desktop identity separately | 0.15.2 resolves the owned backend and JSON daemon PID metadata; rejects unrelated CLI controllers. Reachable local handoffs supported; private/unmanaged desktop backends need a safe manual close/apply |
 | 18 | Refresh email/quota immediately and show CLI/Desktop status separately | Implemented; immediate selected-account read, credential watcher and all-window broadcasts; shared-log fallback removed |
 | 19 | Save and recover work interrupted by a desktop account switch | Implemented for reachable local desktop sessions; private durable checkpoint, safe wait, guarded same-thread continuation and uncertain-delivery checks. Unsupported/cloud/ephemeral/native-tool runtimes need attention |
 | 20 | Recover missing local catalog entries and paginated history; preserve the four restored morning chats | Prior 47 catalog / 28 history imports and morning chats preserved. 0.15.1 adds projectless/sidebar-state recovery from current and legacy profile copies, safe regular snapshots and local-only desktop catalog refresh; private backups retained |
 | 21 | Maintain all requirements, task status and reusable migration prompts in this repository | Implemented; living specification, audit/implementation prompts and an AGENTS.md rule require updates alongside relevant changes |
-| 22 | Paste and parse Codex credential JSON, alongside JSON file import | Implemented and included in installed 0.14.0; email/field-name preview, local format validation and duplicate checks before import. Production/native builds and Rust check passed; no real credential import or native GUI inspection performed |
+| 22 | Paste and parse Codex credential JSON, alongside JSON file import | Implemented since 0.14.0 and included in installed 0.15.2; email/field-name preview, local format validation and duplicate checks before import. Production/native builds and Rust check passed; no real credential import or native GUI inspection performed |
 | 23 | Import provider/all credential-backup JSON additively | Implemented in source for Codex/Claude OAuth and Codex/Claude API-proxy profiles; provider-scoped metadata-only preview, duplicate skip, destination-local profiles and private credentials. Production frontend build, Rust check and universal macOS build passed; no real credential import/Keychain write performed |
-| 24 | Simplify macOS install and upgrades with DMG and Homebrew | Universal 0.15.1 DMG and stable Homebrew download asset attached to the tagged GitHub Release; Cask and release workflow retained. Homebrew installation/audit was not exercised |
+| 24 | Simplify macOS install and upgrades with DMG and Homebrew | Universal 0.15.2 DMG built and verified; installed and relaunched locally. Versioned/stable release assets prepared; Cask and release workflow retained. Homebrew installation/audit was not exercised |
 
 Automatic Hello requires the app to remain running and the computer to be awake. It spends a small
 amount of quota and only attempts a new five-hour window when live provider state allows it. Provider
@@ -56,3 +56,15 @@ isolation, repeatable merges and local-only catalog refresh. The release workflo
 The patch is delivered through the tagged GitHub Release and universal macOS DMG (tasks 9, 11 and
 24). Live credential switching and the installed desktop UI were not exercised; active desktop work
 was left running. The installed Profiles application is unchanged until the release is installed.
+
+Follow-up credential refresh investigation: the running installation was still 0.14.0 with
+apply-on-selection disabled, so CLI selection did not request a desktop refresh. Source fixes for
+tasks 17–19 add desktop-owned backend discovery, JSON daemon PID support and rejection of a
+separate CLI daemon as the desktop controller. Seven focused Rust checks pass. A real Codex
+subprocess scenario with synthetic OAuth and a loopback provider passes seven restart/continuation
+checks, including same-thread recovery, second-credential inference and persisted retry
+acknowledgement. The main desktop processes stayed running. Native desktop/private-transport tool
+recovery remains unsupported. Version 0.15.2 is now installed and relaunched with the built binary
+verified against the installed binary, all account IDs retained and desktop synchronization settings
+preserved. A private app/settings rollback backup and verified universal DMG are retained locally.
+Publication status is tracked in tasks 11 and 24.

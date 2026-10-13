@@ -87,6 +87,11 @@ store. The main `.codex` catalog and project/sidebar state are shared for local 
   Codex live read stays visible; shared session logs are never substituted as another account's quota.
 - **Recover missing local sessions** scans known OAuth profiles, including hidden originals, and
   adds absent local thread catalog entries and complete absent paginated histories to the main home.
+- Account selection changes the CLI profile. Enable **Apply desktop when selecting an account**
+  or use **Apply desktop** to request a desktop handoff. Private desktop backends that cannot be
+  controlled need you to finish active work and close the desktop before applying. Profiles does
+  not use a separate CLI daemon to claim that those desktop sessions were safely interrupted or
+  that their credential change was confirmed.
 - In 0.15.1, repair also recovers projectless chat IDs and desktop workspace/project placement
   records, including copies retained by earlier versions. If sidebar records were recovered, finish
   active desktop work and reapply the desktop account to refresh the chat list. Handoffs merge the

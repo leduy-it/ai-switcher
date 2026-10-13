@@ -14,6 +14,15 @@ pub struct Client {
 
 #[cfg(unix)]
 impl Client {
+    pub fn connect_desktop(runtime: &crate::models::DesktopRuntime) -> Result<Self> {
+        let home = runtime.profile_home.as_deref().context("Desktop execution profile is unknown")?;
+        let backend = runtime.backend_pid.context("Desktop backend ownership could not be confirmed")?;
+        // A private stdio desktop and a CLI daemon can use the same profile simultaneously. The
+        // daemon's account/read or thread/loaded/list does not describe that desktop's active work.
+        anyhow::ensure!(runtime.uses_daemon_proxy || crate::desktop::daemon_pid(home) == Some(backend),
+            "This desktop uses a private backend that Profiles cannot control. Finish its active work and quit it before applying the new account; a separate CLI daemon was left untouched");
+        Self::connect(home)
+    }
     pub fn connect(home: &Path) -> Result<Self> {
         // Managed profile paths exceed macOS's Unix-socket path limit. Codex publishes a
         // symlink to a short /private/tmp socket; resolve it before calling connect().
@@ -97,10 +106,34 @@ impl Client {
     }
 }
 
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refuses_a_cli_daemon_as_a_private_desktop_backend() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("desktop-owner-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("app-server-daemon"))?;
+        std::fs::write(root.join("app-server-daemon/daemon.pid"), r#"{"pid":123}"#)?;
+        let runtime = crate::models::DesktopRuntime {
+            app: crate::models::DesktopApp::Chatgpt, installed: true, running: true, pid: Some(20),
+            backend_pid: Some(456), uses_daemon_proxy: false,
+            profile_home: Some(root.clone()), session_home: Some(root.clone()),
+        };
+        let error = Client::connect_desktop(&runtime).err().context("Wrong backend was accepted")?;
+        assert!(error.to_string().contains("private backend"));
+        std::fs::remove_dir_all(root)?;
+        Ok(())
+    }
+}
+
 #[cfg(not(unix))]
 pub struct Client;
 #[cfg(not(unix))]
 impl Client {
+    pub fn connect_desktop(_runtime: &crate::models::DesktopRuntime) -> Result<Self> {
+        anyhow::bail!("Desktop recovery currently supports macOS")
+    }
     pub fn connect(_home: &Path) -> Result<Self> {
         anyhow::bail!("Desktop recovery currently supports macOS")
     }

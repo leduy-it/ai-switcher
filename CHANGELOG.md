@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.2 — Desktop backend ownership and isolated recovery checks
+
+- Detect the desktop's own bundled app-server child when its GUI launch environment omits the
+  execution profile. Read both legacy numeric and current JSON daemon PID records.
+- Do not use an unrelated CLI daemon's identity or active-thread list as evidence about a desktop
+  using a private backend. Unsupported private transports need a manual safe close/apply instead
+  of falsely confirming a credential switch or interrupting work that was never inspected.
+- Add a runnable isolated subprocess scenario with synthetic OAuth tokens and a local provider:
+  interrupt a test turn, restart under a second identity, resume its original thread and verify the
+  second credential is used. Recovery retry reads its persisted acknowledgement. Main desktop
+  processes, real credentials and quota remain untouched.
+
 ## 0.15.1 — Keep desktop chats visible across credential switches
 
 - Recover projectless chat IDs, workspace/output hints and project/sidebar records before applying
