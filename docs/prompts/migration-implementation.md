@@ -14,6 +14,11 @@ safe desktop exit rather than symlinks replaced by atomic saves. Refresh only th
 desktop catalog scan when restored timestamps predate its watermark; preserve other hosts and
 automations. Verify visibility separately from database import counts.
 
+Resolve the desktop-owned backend before inspecting identity or active work. Never substitute a
+separate CLI daemon for a private desktop connection. Validate credential restart and same-thread
+continuation in isolated subprocesses with synthetic credentials and a loopback provider; report
+native desktop-owned tool recovery separately from backend fixture coverage.
+
 Implement the agreed supported CLI/Desktop, safe handoff/recovery, UI, Hello, export, Codex JSON paste/parse, provider backup import and DMG/Homebrew install requirements. Capability-limited features must expose an accurate need-for-attention state rather than imitate success. Retain the latest Michael Le blue Liquid Glass identity and docs attribution.
 
 Maintain a requirement-to-change log with evidence and remaining limitations. Establish a living requirements document, task index and reusable prompts in the destination repository. Add an AGENTS.md rule requiring their updates in the same change as every relevant feature, behavior, provider, UI, credential/session storage, migration or release change. Append new indices and retain superseded ones. Update README/changelog statements when affected; review docs against final behavior before reporting completion. Separate source implementation, build, installed app validation and published release status. Do not add or run tests unless I request testing; explain which authorized validation is still needed.

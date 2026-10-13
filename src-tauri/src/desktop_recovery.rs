@@ -264,7 +264,7 @@ fn advance(state: &ManagedState, op: &mut Operation, app: &tauri::AppHandle) -> 
             op.view.message = "This desktop was launched outside Switcher and its execution profile is unknown. Finish its work and quit it; the pending switch will then launch it with a verified profile".into();
             return save(state, op, Some(app));
         };
-        let mut client = Client::connect(home)?;
+        let mut client = Client::connect_desktop(runtime)?;
         for thread in client.threads()?.into_iter().filter(active) {
             if seen_threads.insert((
                 home.clone(),
