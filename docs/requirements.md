@@ -348,6 +348,13 @@ Acceptance: an authorized validation on a disposable eligible session retains th
 
 Requirements:
 
+- Find and reopen existing local chats while work is still running. Offer metadata-only title/topic,
+  project-folder and ID search over the shared store and known OAuth profile catalogs, including
+  hidden originals. This action must stay available during pending/unsupported handoffs and must
+  not migrate storage, change credentials, stop a process or send a continuation prompt.
+- Deduplicate results by original chat ID, preserve current shared metadata and archive state,
+  and disclose unreadable catalogs and result limits. Identify profile-only history that requires
+  later safe repair rather than offering a false successful open in the current shared store.
 - Inventory all old profile homes and discover missing local threads even when rollout files are already in the main session directory.
 - Merge the catalog and paginated turn/item history needed by the installed client, not just session_index.jsonl.
 - Preserve IDs, titles, creator identity, original timestamps, policy/config metadata and archive/pin/project relationships where supported.
@@ -367,7 +374,12 @@ Requirements:
 
 The application must expose a repair result with inserted/skipped/conflicting records and unsupported cases. Existing completed threads stay completed; recovering their visibility does not authorize continuing their work.
 
-Acceptance: compare source/destination counts and inspect older pages of representative restored threads. A second migration changes nothing for already imported records and reports conflicts instead of overwriting them.
+Acceptance: search a catalog while a writer holds an uncommitted transaction and verify committed
+chat metadata remains readable without migration or interruption. Check literal wildcard/quote
+searches, duplicate IDs, archived state and partial catalog failures. Opening a shared-store result
+returns to its original chat without starting a turn. Compare source/destination counts and inspect
+older pages of representative migrated threads. A second migration changes nothing for already
+imported records and reports conflicts instead of overwriting them.
 
 ## 21 Living requirements and agent prompts
 

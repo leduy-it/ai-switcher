@@ -85,7 +85,16 @@ store. The main `.codex` catalog and project/sidebar state are shared for local 
 - Credential changes from desktop or CLI trigger an account-specific quota/email refresh while
   Switcher is running. Main, dropdown and overlay receive the same updated snapshot. A failed
   Codex live read stays visible; shared session logs are never substituted as another account's quota.
-- **Recover missing local sessions** scans known OAuth profiles, including hidden originals, and
+- **Find a local chat** searches recent local chats by title, topic, project folder or chat ID across
+  your shared Codex store and known OAuth profiles, including hidden originals. Use it when a chat
+  is missing from the sidebar but Codex is still working. **Open chat** returns to the same chat
+  in the running desktop; continue the conversation there. Finding/opening a chat does not switch
+  accounts, restart Codex, interrupt work or send a message. It remains available during pending
+  or unsupported desktop handoffs. Search results do not claim that a chat is currently active.
+  Include archived chats with the checkbox. At most 100 recent matches are shown; refine the search
+  for older chats. Unreadable catalogs are reported. Profile-only history needs safe repair after
+  active work finishes; it cannot be opened through the current shared catalog yet.
+- **Repair older session history** scans known OAuth profiles, including hidden originals, and
   adds absent local thread catalog entries and complete absent paginated histories to the main home.
 - Account selection changes the CLI profile. Enable **Apply desktop when selecting an account**
   or use **Apply desktop** to request a desktop handoff. Private desktop backends that cannot be

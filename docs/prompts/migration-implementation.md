@@ -14,6 +14,11 @@ safe desktop exit rather than symlinks replaced by atomic saves. Refresh only th
 desktop catalog scan when restored timestamps predate its watermark; preserve other hosts and
 automations. Verify visibility separately from database import counts.
 
+Provide a metadata-only local chat finder independently of migration and handoff. It must remain
+usable while a desktop is busy or its private transport cannot be controlled. Reopen an existing
+shared-store chat by its original ID without sending a prompt or restarting its backend; identify
+profile-only history for later idle repair. Preserve shared archive state when deduplicating results.
+
 Resolve the desktop-owned backend before inspecting identity or active work. Never substitute a
 separate CLI daemon for a private desktop connection. Validate credential restart and same-thread
 continuation in isolated subprocesses with synthetic credentials and a loopback provider; report

@@ -3383,6 +3383,24 @@ impl ManagedState {
         Ok(result)
     }
 
+    pub fn find_local_chats(&self, query: &str, include_archived: bool) -> Result<crate::local_chats::SearchResult> {
+        let sources = {
+            let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let shared = resolved_default_config_dir(&data, &ToolId::Codex);
+            let mut sources = vec![("Shared Codex store".into(), shared.clone())];
+            for account in data.accounts.iter().filter(|a| a.tool_id == ToolId::Codex && a.api_provider.is_none()) {
+                let home = account_config_dir_with_default(&self.store, account, &shared);
+                if !sources.iter().any(|(_, existing)| existing == &home) {
+                    sources.push((account.name.clone(), home));
+                }
+            }
+            sources
+        };
+        // Discovery remains available during active work and pending/unsupported handoffs.
+        // It reads metadata only; it never links files, migrates history or contacts a backend.
+        crate::local_chats::search(sources, query, include_archived)
+    }
+
     pub fn repair_codex_sessions(&self) -> Result<crate::session_migration::Report> {
         let _guard = self
             .account_switch

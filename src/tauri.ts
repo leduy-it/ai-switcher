@@ -432,6 +432,8 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
   }
 
   await new Promise((resolve) => window.setTimeout(resolve, 120));
+  if (command === "find_local_chats") return { chats: [], warnings: [], hasMore: false } as T;
+  if (command === "open_desktop_thread") return undefined as T;
   if (["open_quota_panel", "close_quota_panel", "open_main_window"].includes(command)) return undefined as T;
   if (command === "get_auto_prime_settings" || command === "set_auto_prime_settings") {
     return { enabled: false, accounts: [], records: {}, ...(args?.input as object | undefined) } as T;
@@ -727,6 +729,7 @@ export const api = {
   applyCodexDesktop: (desktopApp: import("./types").DesktopApp) => invoke<AppSnapshot>("apply_codex_desktop", { desktopApp }),
   desktopSwitchAction: (action: "cancel" | "switchNow" | "retry" | "dismiss") => invoke<AppSnapshot>("desktop_switch_action", { action }),
   openDesktopThread: (threadId: string) => invoke<void>("open_desktop_thread", { threadId }),
+  findLocalChats: (query: string, includeArchived: boolean) => invoke<import("./types").LocalChatSearchResult>("find_local_chats", { query, includeArchived }),
   repairCodexSessions: () => invoke<import("./types").SessionMigrationReport>("repair_codex_sessions"),
   setLauncher: (input: SetLauncherInput) => invoke<AppSnapshot>("set_launcher", { input }),
   setAccountHidden: (input: SetAccountHiddenInput) =>
