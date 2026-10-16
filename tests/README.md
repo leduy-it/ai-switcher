@@ -20,3 +20,14 @@ Backend discovery and controller ownership regressions run with:
 ```sh
 cargo test --locked --manifest-path src-tauri/Cargo.toml desktop --lib
 ```
+
+Local chat discovery has isolated SQLite regressions:
+
+```sh
+cargo test --locked --manifest-path src-tauri/Cargo.toml local_chats --lib
+```
+
+These fixtures cover committed reads while a WAL writer is active, shared/archive metadata
+precedence, profile-only history, literal wildcard/quote searches, topic searches with a different
+display name, unsupported catalogs and bounded results. They use temporary catalogs and never
+read real credentials or stop desktop processes. Native chat opening is outside their coverage.

@@ -165,6 +165,8 @@ export interface DesktopSessionView { threadId: string; name: string; cwd: strin
 export interface DesktopOperationView { id: string; phase: string; message: string; targetAccountId: string; sessions: DesktopSessionView[]; updatedAt: string }
 export interface DesktopSyncState { settings: DesktopSyncSettings; lastAppliedAccountId: string | null; lastAppliedAt: string | null; error: string | null; confirmedEmail: string | null; confirmedPlan: string | null; confirmedAt: string | null; operation: DesktopOperationView | null }
 export interface SessionMigrationReport { profiles: number; catalogThreads: number; historyThreads: number; desktopStateProfiles: number; conflicts: number; pendingProjection: number; unavailableRollouts: number; backups: string[] }
+export interface LocalChat { threadId: string; name: string; cwd: string; updatedAt: number; archived: boolean; availableInSharedStore: boolean; profiles: string[] }
+export interface LocalChatSearchResult { chats: LocalChat[]; warnings: string[]; hasMore: boolean }
 
 export type ApiGatewayServerState = "stopped" | "running" | "errored";
 export type ApiPoolAccountState = "available" | "exhausted" | "coolingDown" | "errored" | "excluded";

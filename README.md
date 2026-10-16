@@ -19,6 +19,7 @@ A macOS app for managing and switching accounts for Claude Code, Codex, and Anti
 - View provider quota, account usage, and estimated costs.
 - Use dedicated CLI accounts, a menu-bar quota view, and an optional floating overlay.
 - Back up and append Codex or Claude Code credentials across Macs.
+- Find and reopen local Codex chats across profiles while desktop work continues.
 - Configure automatic account fallback and a local API gateway.
 
 ## More

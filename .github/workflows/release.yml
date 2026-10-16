@@ -36,6 +36,9 @@ jobs:
       - name: Check desktop ownership and session visibility regressions
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml desktop --lib
 
+      - name: Check chat discovery during active work
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml local_chats --lib
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:

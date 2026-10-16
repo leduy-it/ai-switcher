@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.3 — Find and reopen local chats during active work
+
+- Add **Find a local chat** beside the desktop account controls. Search titles, stored topics, project folders
+  and chat IDs across the shared Codex catalog and known OAuth profiles, including hidden ones.
+- Keep chat discovery available during pending handoffs and unsupported private backend states.
+  Open the original shared-store chat in the running desktop without changing accounts, restarting
+  the desktop, migrating storage or sending a continuation prompt.
+- Deduplicate chat IDs, retain shared-store metadata/archive state and show incomplete search
+  results when a catalog cannot be read. Profile-only history is identified for later idle repair.
+- Rename the older repair action to **Repair older session history** so returning to a running
+  chat does not suggest an unnecessary history migration or interruption.
+
+Automatic live sidebar reconciliation still requires a supported safe desktop handoff. Chat
+discovery restores access to an existing local chat; it does not confirm a credential switch.
+
 ## 0.15.2 — Desktop backend ownership and isolated recovery checks
 
 - Detect the desktop's own bundled app-server child when its GUI launch environment omits the

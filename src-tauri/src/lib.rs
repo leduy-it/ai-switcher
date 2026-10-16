@@ -8,6 +8,7 @@ mod desktop_recovery;
 mod desktop_rpc;
 mod desktop_state;
 mod detection;
+mod local_chats;
 mod menubar;
 mod models;
 mod overlay;
@@ -228,6 +229,13 @@ fn open_desktop_thread(state: State<'_, ManagedState>, thread_id: String) -> Res
         .app
         .clone();
     desktop::open_thread(&desktop, &thread_id).map_err(display_error)
+}
+
+#[tauri::command]
+async fn find_local_chats(app: tauri::AppHandle, query: String, include_archived: bool) -> Result<local_chats::SearchResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<ManagedState>().find_local_chats(&query, include_archived).map_err(display_error)
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -729,6 +737,7 @@ pub fn run() {
             apply_codex_desktop,
             desktop_switch_action,
             open_desktop_thread,
+            find_local_chats,
             repair_codex_sessions,
             set_launcher,
             set_account_hidden,
