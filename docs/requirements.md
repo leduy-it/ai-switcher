@@ -89,7 +89,7 @@ Acceptance: create or select known local threads using two OAuth profiles and in
 Requirements:
 
 - Add an account from an existing Codex OAuth auth.json, including file selection in the GUI.
-- Validate the expected OAuth fields and reject unsupported or malformed sources with a useful error.
+- Validate the expected OAuth fields and reject unsupported or malformed sources with a useful error. Normalize Unicode clipboard whitespace only outside JSON strings; preserve token values exactly and keep source files untouched.
 - Copy the validated source into the new account’s private profile; leave the source file untouched.
 - Extract display email and provider identity when available. Evaluate duplicate login identity before adding another active credential copy.
 - Keep token values out of previews, logs and error text. Raw pasted JSON may exist only in the open import dialog until it is cleared, closed or imported; file-import token values stay in the backend.
@@ -127,7 +127,7 @@ Acceptance: inventory all managed and unmanaged copies; report the canonical own
 Requirements:
 
 - Read quota for each eligible provider/account and show its reported plan, available windows, usage/remaining percentages and reset times.
-- Read Codex live quota using the selected identity. Shared rollout logs from another account are not an acceptable live-quota fallback.
+- Read Codex live quota using the selected identity and include its workspace/account header when available. Shared rollout logs from another account are not an acceptable live-quota fallback. Authentication failures must identify the rejected credential and offer account-specific sign-in or current-file import; JSON parsing/import does not prove live validity or renew tokens.
 - Refresh after selection and credential changes, and support manual refresh.
 - Show timestamps, errors, rate limits and stale cached values clearly; unknown is not zero usage.
 - Preserve token/cost reports and provider-specific quota definitions. A missing five-hour bucket on Pro/Team/Business is not automatically a read failure.
@@ -400,12 +400,12 @@ Acceptance: another agent can read the repository documents without the developm
 Requirements:
 
 - The Codex account dialog offers a Paste JSON box and a separate Import file option. Both accept raw Codex OAuth auth.json and use the same parser and isolated-profile import flow.
-- Parsing checks JSON syntax, OAuth token fields and a 1 MB limit without contacting the provider or creating an account. Show the available email, token field names and duplicate status; never display token values in the preview or error text.
+- Parsing checks JSON syntax, OAuth token fields and a 1 MB limit without contacting the provider or creating an account. Accept NBSP, narrow NBSP and other Unicode indentation from clipboard formatting only outside quoted strings, including escaped quote/backslash cases. Show the available email, token field names and duplicate status; never display token values in the preview or error text.
 - Editing the pasted JSON or changing source invalidates its preview. Import requires a successfully parsed, nonduplicate source and revalidates it in the backend before creating the profile.
 - Keep pasted credentials only in the open dialog until import. Never store them in browser storage, logs or public files. Imported credentials use the existing private per-account storage and permissions; selected source files remain untouched.
 - API keys use the existing API / Proxy form. An exported multi-provider backup is not a raw auth.json and needs a separately specified restore flow.
 
-Acceptance: both source choices are visible, parsing creates no account and makes no quota request, malformed/oversized/non-OAuth inputs receive a useful error without secret contents, email may remain unknown, duplicates cannot be imported, and a valid import uses isolated private credentials with shared eligible session storage.
+Acceptance: test rich-text clipboard spacing in both pasted and selected-file sources, exact preservation of token/string values and unchanged source files. Both source choices are visible, parsing creates no account and makes no quota request, malformed/oversized/non-OAuth inputs receive a useful error without secret contents, email may remain unknown, duplicates cannot be imported, and a valid import uses isolated private credentials with shared eligible session storage.
 
 ## Existing app features to preserve when applicable
 

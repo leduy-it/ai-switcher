@@ -649,7 +649,8 @@ fn seed_claude_credentials_file(config_dir: &Path) {
         return; // default account: keychain-only, never mirror
     }
     let suffix = claude_keychain_suffix(config_dir);
-    let Some(keychain_blob) = read_keychain_blob(&format!("Claude Code-credentials-{suffix}")) else {
+    let Some(keychain_blob) = read_keychain_blob(&format!("Claude Code-credentials-{suffix}"))
+    else {
         return; // keychain locked/empty (DarkWake) or account uses file already — nothing to mirror
     };
     let file = config_dir.join(".credentials.json");
@@ -1450,13 +1451,14 @@ pub(crate) fn read_live_five_hour(
 fn read_codex_usage_endpoint(config_dir: &Path) -> Result<QuotaInfo> {
     let token =
         codex_access_token_fresh(config_dir).context("couldn't get Codex's access_token")?;
-    let body = curl_get(
-        "https://chatgpt.com/backend-api/wham/usage",
-        &[
-            ("Authorization", format!("Bearer {token}").as_str()),
-            ("Accept", "application/json"),
-        ],
-    )?;
+    let account_id = codex_account_id(config_dir);
+    let headers = codex_usage_headers(&token, account_id.as_deref());
+    let headers = headers
+        .iter()
+        .map(|(name, value)| (*name, value.as_str()))
+        .collect::<Vec<_>>();
+    let body = curl_get("https://chatgpt.com/backend-api/wham/usage", &headers)
+        .map_err(codex_quota_error)?;
     let value: serde_json::Value =
         serde_json::from_str(&body).context("Codex usage response is not JSON")?;
     let mut quota = quota_from_codex_endpoint(&value)?;
@@ -1466,14 +1468,39 @@ fn read_codex_usage_endpoint(config_dir: &Path) -> Result<QuotaInfo> {
     Ok(quota)
 }
 
+fn codex_usage_headers(token: &str, account_id: Option<&str>) -> Vec<(&'static str, String)> {
+    let mut headers = vec![
+        ("Authorization", format!("Bearer {token}")),
+        ("Accept", "application/json".to_string()),
+    ];
+    if let Some(account_id) = account_id.filter(|id| !id.trim().is_empty()) {
+        headers.push(("ChatGPT-Account-Id", account_id.to_string()));
+    }
+    headers
+}
+
+fn codex_quota_error(error: anyhow::Error) -> anyhow::Error {
+    match error
+        .downcast_ref::<HttpStatusError>()
+        .map(|error| error.status)
+    {
+        Some(status @ (401 | 403)) => anyhow::anyhow!(
+            "Codex rejected this credential (HTTP {status}). Open this account's Codex command \
+             and sign in again, or import a current auth.json from the working machine. \
+             Importing JSON does not renew tokens."
+        ),
+        _ => error,
+    }
+}
+
 /// Returns the account's current Codex access token from `auth.json`, WITHOUT refreshing it.
 ///
 /// Same principle as `claude_oauth_token_fresh`: we never run the refresh-token grant or rewrite
 /// `auth.json` ourselves. OpenAI's grant rotates the refresh token, so doing it here would consume
 /// the token a live `codex` session still holds and could log that account out. The Codex CLI owns
-/// the refresh lifecycle (it re-reads `auth.json` per run). Codex access tokens last ~8 days, so an
-/// account essentially never goes stale between uses; if one does, its quota reads as unavailable
-/// until the next `codex` run renews the token.
+/// the refresh lifecycle (it re-reads `auth.json` per run). Imported snapshots can already be
+/// expired, or can become stale while the source machine renews its own copy. Quota remains
+/// unavailable until this profile is signed in again or receives a current credential.
 ///
 /// (Kept as a distinct name so call sites read intentionally; it is now a plain read.)
 pub(crate) fn codex_access_token_fresh(config_dir: &Path) -> Option<String> {
@@ -1572,7 +1599,9 @@ fn jwt_email_from_claims(claims: &serde_json::Value) -> Option<String> {
         claims
             .get("https://api.openai.com/profile")
             .and_then(|profile| profile.get("email")),
-        claims.get("profile").and_then(|profile| profile.get("email")),
+        claims
+            .get("profile")
+            .and_then(|profile| profile.get("email")),
         claims.get("user").and_then(|user| user.get("email")),
     ];
     let email = candidates
@@ -1877,6 +1906,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn codex_quota_headers_include_only_the_selected_workspace() {
+        let headers = codex_usage_headers("synthetic-access", Some("selected-workspace"));
+        assert!(headers.contains(&("Authorization", "Bearer synthetic-access".to_string())));
+        assert!(headers.contains(&("ChatGPT-Account-Id", "selected-workspace".to_string())));
+        for account_id in [None, Some(""), Some(" ")] {
+            let headers = codex_usage_headers("synthetic-access", account_id);
+            assert!(!headers
+                .iter()
+                .any(|(name, _)| *name == "ChatGPT-Account-Id"));
+        }
+    }
+
+    #[test]
+    fn codex_quota_auth_failures_explain_sign_in_without_claiming_import_success() {
+        for status in [401, 403] {
+            let error = codex_quota_error(
+                HttpStatusError {
+                    status,
+                    retry_after_secs: None,
+                }
+                .into(),
+            );
+            let message = error.to_string();
+            assert!(message.contains(&format!("HTTP {status}")));
+            assert!(message.contains("sign in again"));
+            assert!(message.contains("Importing JSON does not renew tokens"));
+            assert_eq!(
+                classify_live_quota_error(&error),
+                LiveQuotaError::Authentication
+            );
+        }
+    }
+
+    #[test]
+    fn codex_quota_rate_limits_and_network_failures_keep_their_original_cause() {
+        let error = codex_quota_error(
+            HttpStatusError {
+                status: 429,
+                retry_after_secs: Some(120),
+            }
+            .into(),
+        );
+        assert_eq!(
+            error
+                .downcast_ref::<HttpStatusError>()
+                .unwrap()
+                .retry_after_secs,
+            Some(120)
+        );
+        assert_eq!(
+            classify_live_quota_error(&error),
+            LiveQuotaError::RateLimited
+        );
+        let error = codex_quota_error(anyhow::anyhow!("network timeout"));
+        assert_eq!(error.to_string(), "network timeout");
+        assert_eq!(classify_live_quota_error(&error), LiveQuotaError::Network);
+    }
+
+    #[test]
     fn curl_write_out_splits_body_retry_after_and_status() {
         let (body, retry, status) = split_curl_write_out("{\"a\":1}\n3401\n429").unwrap();
         assert_eq!((body, retry, status), ("{\"a\":1}", Some(3401), 429));
@@ -1916,15 +2004,21 @@ mod tests {
         // Just past the skew (expires in 11 min) → still valid.
         assert!(claude_token_still_valid(&blob(now_ms + 11 * 60 * 1000)));
         // Missing expiresAt → fail safe (needs renewal).
-        assert!(!claude_token_still_valid(&serde_json::json!({ "claudeAiOauth": { "accessToken": "x" } })));
+        assert!(!claude_token_still_valid(
+            &serde_json::json!({ "claudeAiOauth": { "accessToken": "x" } })
+        ));
     }
 
     #[test]
     fn blob_expires_at_picks_newer_token() {
-        let blob = |ms: i64| format!(r#"{{"claudeAiOauth":{{"accessToken":"x","expiresAt":{ms}}}}}"#);
+        let blob =
+            |ms: i64| format!(r#"{{"claudeAiOauth":{{"accessToken":"x","expiresAt":{ms}}}}}"#);
         assert_eq!(blob_expires_at(&blob(1782426533086)), 1782426533086);
         // Missing expiresAt → 0 (treated as oldest, so a real token always wins).
-        assert_eq!(blob_expires_at(r#"{"claudeAiOauth":{"accessToken":"x"}}"#), 0);
+        assert_eq!(
+            blob_expires_at(r#"{"claudeAiOauth":{"accessToken":"x"}}"#),
+            0
+        );
         // Unparseable → 0.
         assert_eq!(blob_expires_at("not json"), 0);
         // The seed's decision: keychain copied to file only when STRICTLY newer.
@@ -1934,7 +2028,6 @@ mod tests {
         assert!(blob_expires_at(&file) >= blob_expires_at(&keychain_older)); // keep file
         assert!(blob_expires_at(&file) < blob_expires_at(&keychain_newer)); // copy keychain
     }
-
 
     #[test]
     fn parses_codex_rate_limits_line() {

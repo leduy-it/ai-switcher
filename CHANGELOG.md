@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.4 — Codex credential clipboard import and quota errors
+
+- Accept nonbreaking and other Unicode indentation copied from rich-text messages in both Codex JSON paste and file import. Normalize formatting only outside quoted strings; preserve credential values and leave selected source files untouched.
+- Send the selected workspace header with Codex live quota requests. Explain rejected credentials (HTTP 401/403) with account-specific sign-in/current-file import guidance while preserving network and rate-limit errors.
+- Clarify that parsing checks format and required fields; importing does not verify live sign-in or renew tokens. Quota reads continue to avoid refresh-token rotation.
+- Add synthetic regression checks for clipboard formatting, escaped strings, private error messages, source-file preservation, workspace routing and authentication/rate-limit handling.
+
 ## 0.15.3 — Find and reopen local chats during active work
 
 - Add **Find a local chat** beside the desktop account controls. Search titles, stored topics, project folders

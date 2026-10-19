@@ -10,10 +10,10 @@ and release delivery; document remaining limitations and evidence with the corre
 | Index | Requested task | Status |
 | --- | --- | --- |
 | 1 | Share Codex CLI/Desktop session history with the main `.codex` catalog | Implemented; 0.15.1 fixes desktop sidebar visibility across atomic saves and credential handoffs; OAuth credentials remain per profile |
-| 2 | Import Codex accounts from `auth.json` | Implemented |
+| 2 | Import Codex accounts from `auth.json` | 0.15.4 normalizes rich-text clipboard spacing outside strings; preserves credential values and source files |
 | 3 | Show account email in profiles and Usage sessions | Implemented where source metadata is available |
 | 4 | Consolidate duplicate profiles and prevent credential conflicts | Duplicate profiles hidden; shared-token copies detected; original data retained |
-| 5 | Fetch and display account quota | Implemented; provider auth/read failures remain visible |
+| 5 | Fetch and display account quota | 0.15.4 sends the selected workspace header and explains rejected credentials; parsing/import is separate from live authentication |
 | 6 | Quick quota access from the sidebar and richer full app | Implemented; sidebar now opens the menu-bar table |
 | 7 | Give quota-reset credits a distinct icon from refresh | Implemented |
 | 8 | Michael Le (duyle) identity, blue logo/theme and duyle.me link | Implemented; original author thanked in documentation |
@@ -30,7 +30,7 @@ and release delivery; document remaining limitations and evidence with the corre
 | 19 | Save and recover work interrupted by a desktop account switch | Implemented for reachable local desktop sessions; private durable checkpoint, safe wait, guarded same-thread continuation and uncertain-delivery checks. Unsupported/cloud/ephemeral/native-tool runtimes need attention |
 | 20 | Recover missing local catalog entries and paginated history; preserve the four restored morning chats | 0.15.3 adds metadata-only chat search and original-chat opening during active work/pending handoffs, independent of idle migration. Shared metadata/archive state wins over profile copies; profile-only histories need later safe repair. Prior 47 catalog / 28 history imports and sidebar recovery remain preserved. Validation/build evidence recorded below |
 | 21 | Maintain all requirements, task status and reusable migration prompts in this repository | Implemented; living specification, audit/implementation prompts and an AGENTS.md rule require updates alongside relevant changes |
-| 22 | Paste and parse Codex credential JSON, alongside JSON file import | Implemented since 0.14.0 and included in installed 0.15.2; email/field-name preview, local format validation and duplicate checks before import. Production/native builds and Rust check passed; no real credential import or native GUI inspection performed |
+| 22 | Paste and parse Codex credential JSON, alongside JSON file import | 0.15.4 repairs NBSP/Unicode indentation in paste and file sources with exact string/token preservation; local parsing and duplicate checks remain separate from live quota validation. Delivery evidence below |
 | 23 | Import provider/all credential-backup JSON additively | Implemented in source for Codex/Claude OAuth and Codex/Claude API-proxy profiles; provider-scoped metadata-only preview, duplicate skip, destination-local profiles and private credentials. Production frontend build, Rust check and universal macOS build passed; no real credential import/Keychain write performed |
 | 24 | Simplify macOS install and upgrades with DMG and Homebrew | Universal 0.15.2 DMG built and verified; installed and relaunched locally. Versioned/stable assets distributed through the [0.15.2 release](https://github.com/leduy-it/ai-switcher/releases/tag/v0.15.2); Cask and release workflow retained. Homebrew installation/audit was not exercised |
 
@@ -75,3 +75,9 @@ Publication status is tracked in tasks 11 and 24.
 - Validation: three focused Rust regressions passed, including a live WAL writer, literal searches, topic/name metadata, shared archive precedence, unsupported catalogs and result limits. Frontend production build passed. Universal native .app built for arm64 and x86_64, bundle version confirmed as 0.15.3. ZIP integrity verified. DMG packaging failed because local macOS disk-image services are unavailable (hdiutil reported Device not configured; diskutil could not use DiskManagement). Native chat opening/switching was not exercised as a test with active user work.
 - Installed application: 0.15.2 remains installed.
 - Publication: source is tracked on [fix/find-local-chats](https://github.com/leduy-it/ai-switcher/tree/fix/find-local-chats); universal .app ZIP built locally. GitHub Release/Homebrew remain at the prior published version.
+
+## 0.15.4 Codex clipboard import delivery
+
+- Source: Unicode whitespace repair outside JSON strings for both paste/file sources; preserved token values and source files, selected-workspace quota header and actionable authentication failures. No automatic token renewal or credential replacement.
+- Validation: six synthetic parser regressions and three workspace/authentication quota regressions passed; frontend production build passed. An opt-in live smoke check passed through the clipboard parser, private profile writer and production quota reader with explicitly authorized usable credentials; source and imported credential values remained unchanged with no token rotation. Universal native build is pending. Real rejected credentials cannot be made valid by formatting repair; cross-machine live success requires current usable credentials.
+- Installed application and publication: pending. Existing account profiles and active Codex/ChatGPT sessions are preserved.

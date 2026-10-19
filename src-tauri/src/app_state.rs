@@ -4854,6 +4854,75 @@ fn local_time_label_from_iso(iso: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Opt-in only: exercise the actual clipboard parser, private credential writer and live quota
+    /// reader together. Never use real credentials in default tests or CI; the caller must have
+    /// explicit authorization and supply a private local auth file through the environment.
+    #[test]
+    #[ignore = "Requires explicitly authorized live Codex quota access and AISW_CODEX_SMOKE_AUTH_FILE"]
+    fn codex_import_live_quota_smoke() -> Result<()> {
+        let source = std::env::var_os("AISW_CODEX_SMOKE_AUTH_FILE")
+            .context("Set AISW_CODEX_SMOKE_AUTH_FILE to an authorized local auth.json")?;
+        let original = std::fs::read_to_string(&source)?;
+        let pasted = original.replace("\n  ", "\n\u{00a0}\u{00a0}");
+        let (normalized, auth) = crate::codex_import::load(&crate::models::CodexAuthSourceInput {
+            auth_file_path: None,
+            auth_json: Some(pasted),
+        })?;
+        let original_auth: serde_json::Value = serde_json::from_str(&original)?;
+        assert!(
+            auth["tokens"] == original_auth["tokens"],
+            "Credential values changed"
+        );
+
+        struct PrivateProfile(std::path::PathBuf);
+        impl Drop for PrivateProfile {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let profile = PrivateProfile(
+            std::env::temp_dir().join(format!("codex-import-smoke-{}", Uuid::new_v4())),
+        );
+        std::fs::create_dir(&profile.0)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&profile.0, std::fs::Permissions::from_mode(0o700))?;
+        }
+        write_private_codex_auth(&profile.0, normalized.as_bytes())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(profile.0.join("auth.json"))?
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let quota = read_quota(&ToolId::Codex, &profile.0);
+        anyhow::ensure!(
+            quota.error.is_none(),
+            "Live quota failed: {}",
+            quota.error.as_deref().unwrap_or("unknown")
+        );
+        anyhow::ensure!(
+            quota.five_hour.percent_used.is_some() || quota.weekly.percent_used.is_some(),
+            "No live quota windows returned"
+        );
+        assert!(
+            std::fs::read_to_string(&source)? == original,
+            "Source credentials changed"
+        );
+        assert!(
+            std::fs::read_to_string(profile.0.join("auth.json"))? == normalized,
+            "Quota read changed credentials"
+        );
+        println!(
+            "Private import and live quota succeeded: plan={:?}, five_hour={:?}, weekly={:?}",
+            quota.plan, quota.five_hour.percent_used, quota.weekly.percent_used
+        );
+        Ok(())
+    }
+
     fn window(percent: Option<f64>, reset_at: Option<String>) -> crate::models::QuotaWindow {
         crate::models::QuotaWindow {
             label: "w".to_string(),

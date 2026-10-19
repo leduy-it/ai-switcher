@@ -41,3 +41,5 @@ Conclude with:
 5. A complete indexed status list, including unsupported and unverified items.
 
 Do not claim parity, conflict elimination, successful installation or task completion without evidence. Do not start implementation during this audit.
+
+For Codex auth imports, verify Unicode clipboard whitespace repair outside quoted strings, exact credential preservation, unchanged source files and metadata-only previews. Check that live quota includes the selected workspace and that rejected credentials remain an actionable sign-in error; parsing/import must not be described as successful live authentication or token renewal.

@@ -2909,7 +2909,7 @@ function Quota({
     );
   }
   if (quota.error) {
-    // A 401/403 quota read means the stored OAuth token expired. For Claude subscription accounts
+    // A 401/403 quota read means the provider rejected the stored OAuth credential. For Claude subscription accounts
     // offer a re-check: safe to click any time — it never spawns the CLI to auto-refresh anymore
     // (that used to invalidate a live `claude` session elsewhere, forcing a manual /login — verified
     // live 2026-07-08/09). It just re-reads the token: clears a transient 401, or tells you to log in
@@ -3316,12 +3316,13 @@ function AddDialog({
               {parsingAuth ? <Loader2 className="spin" /> : <Plus />}
               {authFilePath ? "Choose another JSON file" : "Choose Codex auth.json"}
             </button>}
-            {authPreview && <div className={`authJsonPreview ${authPreview.alreadyAdded ? "duplicate" : ""}`} role="status"><strong>{authPreview.email ?? "Email unavailable in this JSON"}</strong><span>{authPreview.alreadyAdded ? "This login is already added. Use its existing profile." : "JSON parsed · Codex OAuth fields present"}</span><small>Fields: {authPreview.tokenFields.join(", ")}. Sign-in validity is checked after import.</small></div>}
+            {authPreview && <div className={`authJsonPreview ${authPreview.alreadyAdded ? "duplicate" : ""}`} role="status"><strong>{authPreview.email ?? "Email unavailable in this JSON"}</strong><span>{authPreview.alreadyAdded ? "This login is already added. Use its existing profile." : "JSON parsed · Codex OAuth fields present"}</span><small>Fields: {authPreview.tokenFields.join(", ")}. Live quota is checked after import; parsing does not verify sign-in or renew tokens.</small></div>}
             <p className="hint">
               {authSource === "file" && authFileName
                 ? `Selected ${authFileName}.`
                 : "Paste JSON or import the auth.json from the account you want to add."} The credentials
-              are copied into a separate Switcher profile; the original file is left untouched. Use
+              are copied into a separate Switcher profile; the original file is left untouched.
+              Clipboard spacing is repaired while token values are preserved. Use
               one profile for this login at a time so Codex's rotating refresh tokens don't conflict.
             </p>
           </>
