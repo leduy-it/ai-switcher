@@ -1713,6 +1713,7 @@ impl ManagedState {
                     .as_ref()
                     .is_none_or(|tool| tool == &account.tool_id)
                     && (input.include_hidden || !account.hidden)
+                    && input.account_id.as_ref().is_none_or(|id| id == &account.id)
             })
             .map(|account| {
                 let default_dir = resolved_default_config_dir(&data, &account.tool_id);
@@ -1735,7 +1736,11 @@ impl ManagedState {
                 (account, dir)
             })
             .collect();
-        let usage = Some(self.usage_report(0));
+        let usage = if input.account_id.is_some() || input.native_codex {
+            None
+        } else {
+            Some(self.usage_report(0))
+        };
         crate::credential_export::save(input, profiles, usage)
     }
 
@@ -1751,7 +1756,7 @@ impl ManagedState {
                 crate::credential_import::ImportedCredential::CodexOAuth {
                     account_id,
                     user_id,
-                    ..
+                    raw_auth,
                 } => {
                     let data = self
                         .data
@@ -1767,7 +1772,7 @@ impl ManagedState {
                             account_id.as_deref(),
                             user_id.as_deref(),
                             imported.email.as_deref(),
-                        ),
+                        ) || codex_refresh_token_exists(&self.store, &data, &default_dir, raw_auth),
                     )
                 }
                 crate::credential_import::ImportedCredential::ClaudeOAuth { raw_credentials } => (
@@ -1788,6 +1793,7 @@ impl ManagedState {
             });
         }
         Ok(CredentialsImportPreview {
+            fingerprint: backup.fingerprint,
             accounts,
             unsupported_count: backup.unsupported_count,
             unavailable_count: backup.unavailable_count,
@@ -1799,8 +1805,10 @@ impl ManagedState {
         &self,
         path: &std::path::Path,
         scope: Option<&ToolId>,
+        selected_indices: Option<&[usize]>,
+        fingerprint: Option<&str>,
     ) -> Result<CredentialsImportResult> {
-        let backup = crate::credential_import::load(path, scope)?;
+        let backup = crate::credential_import::load(path, scope)?.select(selected_indices, fingerprint)?;
         let mut result = CredentialsImportResult {
             imported_count: 0,
             duplicate_count: 0,
@@ -1814,7 +1822,7 @@ impl ManagedState {
                 crate::credential_import::ImportedCredential::CodexOAuth {
                     account_id,
                     user_id,
-                    ..
+                    raw_auth,
                 } => {
                     let data = self
                         .data
@@ -1828,7 +1836,7 @@ impl ManagedState {
                         account_id.as_deref(),
                         user_id.as_deref(),
                         imported.email.as_deref(),
-                    )
+                    ) || codex_refresh_token_exists(&self.store, &data, &default_dir, raw_auth)
                 }
                 crate::credential_import::ImportedCredential::ClaudeOAuth { raw_credentials } => {
                     self.claude_import_is_duplicate(raw_credentials)?
@@ -3879,6 +3887,15 @@ fn account_config_dir_with_default(
     }
 }
 
+fn codex_refresh_token_exists(store: &Store, data: &StoredState, default_dir: &std::path::Path, raw_auth: &str) -> bool {
+    let Ok(auth) = serde_json::from_str::<serde_json::Value>(raw_auth) else { return false; };
+    let Some(refresh) = auth.pointer("/tokens/refresh_token").and_then(serde_json::Value::as_str).filter(|token| !token.is_empty()) else { return false; };
+    data.accounts.iter().filter(|account| account.tool_id == ToolId::Codex && account.api_provider.is_none()).any(|account| {
+        let path = account_config_dir_with_default(store, account, default_dir).join("auth.json");
+        crate::codex_import::load(&crate::models::CodexAuthSourceInput { auth_file_path: Some(path), auth_json: None }).ok().is_some_and(|(_, existing)| existing.pointer("/tokens/refresh_token").and_then(serde_json::Value::as_str) == Some(refresh))
+    })
+}
+
 fn codex_identity_exists(
     store: &Store,
     data: &StoredState,
@@ -4853,6 +4870,24 @@ fn local_time_label_from_iso(iso: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_backup_detects_existing_hidden_token_only_login() {
+        let root = std::env::temp_dir().join(format!("token-duplicate-{}", Uuid::new_v4()));
+        let store = Store::for_test(root.clone()).unwrap();
+        let account: Account = serde_json::from_value(serde_json::json!({
+            "id":"hidden", "toolId":"codex", "name":"Hidden", "state":"idle", "fingerprint":"profile:hidden", "createdAt":"now", "updatedAt":"now", "hidden":true
+        })).unwrap();
+        let dir = store.account_dir(&ToolId::Codex, &account.id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let raw = r#"{"tokens":{"access_token":"synthetic-access","refresh_token":"synthetic-refresh"}}"#;
+        std::fs::write(dir.join("auth.json"), raw).unwrap();
+        let data = StoredState { accounts: vec![account], ..StoredState::default() };
+        assert!(codex_refresh_token_exists(&store, &data, &root.join("default"), raw));
+        assert!(!codex_refresh_token_exists(&store, &data, &root.join("default"), &raw.replace("synthetic-refresh", "other-refresh")));
+        assert!(!codex_refresh_token_exists(&store, &data, &root.join("default"), "{}"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     /// Opt-in only: exercise the actual clipboard parser, private credential writer and live quota
     /// reader together. Never use real credentials in default tests or CI; the caller must have

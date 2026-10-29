@@ -51,7 +51,7 @@ pub fn load(source: &CodexAuthSourceInput) -> Result<(String, serde_json::Value)
 
 /// Rich-text clipboards can replace indentation with NBSP/narrow NBSP. Repair only whitespace
 /// outside JSON strings: credential bytes, escaped quotes and backslashes must remain unchanged.
-fn normalize_json_whitespace(raw: &str) -> String {
+pub(crate) fn normalize_json_whitespace(raw: &str) -> String {
     let mut in_string = false;
     let mut escaped = false;
     raw.chars()

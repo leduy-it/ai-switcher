@@ -31,10 +31,33 @@ pub struct ImportedAccount {
 }
 
 pub struct CredentialBackup {
+    pub fingerprint: String,
     pub accounts: Vec<ImportedAccount>,
     pub unsupported_count: usize,
     pub unavailable_count: usize,
     pub invalid_count: usize,
+}
+
+impl CredentialBackup {
+    pub fn select(mut self, indices: Option<&[usize]>, fingerprint: Option<&str>) -> Result<Self> {
+        if let Some(indices) = indices {
+            anyhow::ensure!(
+                fingerprint == Some(self.fingerprint.as_str()),
+                "The JSON file changed; preview it again before importing"
+            );
+            anyhow::ensure!(
+                indices.iter().all(|index| *index < self.accounts.len()),
+                "Invalid account selection; preview the file again"
+            );
+            self.accounts = self
+                .accounts
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, account)| indices.contains(&index).then_some(account))
+                .collect();
+        }
+        Ok(self)
+    }
 }
 
 pub fn load(path: &Path, scope: Option<&ToolId>) -> Result<CredentialBackup> {
@@ -49,13 +72,73 @@ pub fn load(path: &Path, scope: Option<&ToolId>) -> Result<CredentialBackup> {
         "The credential backup is larger than 100 MB"
     );
     let bytes = fs::read(path).context("Couldn't read the selected JSON file")?;
-    let document: Value = serde_json::from_slice(&bytes).map_err(|error| {
+    use sha2::{Digest, Sha256};
+    let fingerprint = format!("{:x}", Sha256::digest(&bytes));
+    let text = std::str::from_utf8(&bytes).context("Credential JSON must be UTF-8")?;
+    let normalized =
+        crate::codex_import::normalize_json_whitespace(text.trim_start_matches('\u{feff}').trim());
+    let document: Value = serde_json::from_str(&normalized).map_err(|error| {
         anyhow::anyhow!(
             "Invalid credential backup JSON at line {}, column {}",
             error.line(),
             error.column()
         )
     })?;
+    if document.is_array() || document.get("tokens").is_some() {
+        let entries = if let Some(entries) = document.as_array() {
+            entries.clone()
+        } else {
+            vec![document]
+        };
+        let mut backup = CredentialBackup {
+            fingerprint,
+            accounts: vec![],
+            unsupported_count: 0,
+            unavailable_count: 0,
+            invalid_count: 0,
+        };
+        if scope.is_some_and(|tool| *tool != ToolId::Codex) {
+            return Ok(backup);
+        }
+        let mut seen = std::collections::HashSet::new();
+        for auth in entries {
+            let raw = serde_json::to_string(&auth)?;
+            // Reuse native validation. Invalid entries never reach the metadata preview.
+            if crate::codex_import::load(&CodexAuthSourceInput {
+                auth_file_path: None,
+                auth_json: Some(raw.clone()),
+            })
+            .is_err()
+            {
+                backup.invalid_count += 1;
+                continue;
+            }
+            let refresh = auth
+                .pointer("/tokens/refresh_token")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if !seen.insert(refresh.to_string()) {
+                continue;
+            }
+            let entry = serde_json::json!({ "account": {"toolId": "codex", "name": "Codex imported"}, "rawCodexAuth": raw });
+            match parse_account(&ToolId::Codex, &entry) {
+                Ok(Some(mut account)) => {
+                    if let Some(email) = &account.email {
+                        account.name = email
+                            .split('@')
+                            .next()
+                            .unwrap_or("Codex imported")
+                            .chars()
+                            .take(20)
+                            .collect();
+                    }
+                    backup.accounts.push(account);
+                }
+                _ => backup.invalid_count += 1,
+            }
+        }
+        return Ok(backup);
+    }
     anyhow::ensure!(
         document.get("format").and_then(Value::as_str) == Some("michael-le-profiles-credentials"),
         "This is not a Michael Le Profiles credential backup"
@@ -70,6 +153,7 @@ pub fn load(path: &Path, scope: Option<&ToolId>) -> Result<CredentialBackup> {
         .context("Credential backup has no provider accounts")?;
 
     let mut backup = CredentialBackup {
+        fingerprint,
         accounts: Vec::new(),
         unsupported_count: 0,
         unavailable_count: 0,
@@ -247,4 +331,67 @@ fn file_raw<'a>(
     filename: &str,
 ) -> Option<&'a str> {
     files?.get(filename)?.get("raw")?.as_str()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_import_accepts_bom_and_unicode_indent() {
+        let path =
+            std::env::temp_dir().join(format!("unicode-import-{}.json", uuid::Uuid::new_v4()));
+        fs::write(&path, "\u{feff}[{\n\u{a0}\"tokens\":{\"access_token\":\"synthetic\",\"refresh_token\":\"keep\u{a0}exact\"}}]").unwrap();
+        let backup = load(&path, None).unwrap();
+        assert_eq!(backup.accounts.len(), 1);
+        match &backup.accounts[0].credential {
+            ImportedCredential::CodexOAuth { raw_auth, .. } => {
+                assert!(raw_auth.contains("keep\u{a0}exact"))
+            }
+            _ => panic!("expected OAuth"),
+        }
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn native_bulk_preview_skips_invalid_entries_and_selects_without_secret_data() {
+        let path =
+            std::env::temp_dir().join(format!("native-import-{}.json", uuid::Uuid::new_v4()));
+        let auth = serde_json::json!({"tokens":{"access_token":"synthetic", "refresh_token":"synthetic-refresh"}});
+        fs::write(
+            &path,
+            serde_json::to_vec(&serde_json::json!([auth, {"tokens":{}}, auth])).unwrap(),
+        )
+        .unwrap();
+        let backup = load(&path, None).unwrap();
+        assert_eq!(backup.accounts.len(), 1);
+        assert_eq!(backup.invalid_count, 1);
+        let fingerprint = backup.fingerprint.clone();
+        assert!(load(&path, None)
+            .unwrap()
+            .select(Some(&[1]), Some(&fingerprint))
+            .is_err());
+        assert!(load(&path, None)
+            .unwrap()
+            .select(Some(&[0]), Some("stale"))
+            .is_err());
+        assert_eq!(
+            load(&path, None)
+                .unwrap()
+                .select(Some(&[]), Some(&fingerprint))
+                .unwrap()
+                .accounts
+                .len(),
+            0
+        );
+        assert_eq!(
+            load(&path, None)
+                .unwrap()
+                .select(Some(&[0]), Some(&fingerprint))
+                .unwrap()
+                .accounts
+                .len(),
+            1
+        );
+        fs::remove_file(path).unwrap();
+    }
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — Codex native JSON sharing
+
+- Export one Codex OAuth account as its native auth.json object, or all as one JSON array of native auth objects. No custom backup wrapper, config, quota or session data is included. Keep atomic private file writes; report skipped unavailable/API sources.
+- Import native Codex auth objects/arrays through the JSON import control, with metadata-only preview and per-account checkboxes. Reject a selected import if the file changed after preview. Keep existing single-account import and schema-v1 backups compatible.
+- Installed app and published release remain unchanged by this source update.
+
 ## 0.15.4 — Codex credential clipboard import and quota errors
 
 - Accept nonbreaking and other Unicode indentation copied from rich-text messages in both Codex JSON paste and file import. Normalize formatting only outside quoted strings; preserve credential values and leave selected source files untouched.

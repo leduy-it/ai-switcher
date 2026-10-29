@@ -121,6 +121,7 @@ export interface CredentialsImportPreviewAccount {
 }
 
 export interface CredentialsImportPreview {
+  fingerprint: string;
   accounts: CredentialsImportPreviewAccount[];
   unsupportedCount: number;
   unavailableCount: number;

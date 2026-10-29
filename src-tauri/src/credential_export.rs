@@ -43,6 +43,87 @@ pub fn save(
     if !input.path.is_absolute() {
         anyhow::bail!("Choose an absolute export file path");
     }
+    if input.account_id.is_some() {
+        anyhow::ensure!(
+            input.tool_id == Some(ToolId::Codex),
+            "Choose Codex for a single-account export"
+        );
+    }
+    let profiles: Vec<_> = profiles
+        .into_iter()
+        .filter(|(account, _)| {
+            input
+                .tool_id
+                .as_ref()
+                .is_none_or(|tool| tool == &account.tool_id)
+                && (input.include_hidden || !account.hidden)
+                && input.account_id.as_ref().is_none_or(|id| id == &account.id)
+        })
+        .collect();
+    if input.account_id.is_some() {
+        anyhow::ensure!(
+            profiles.len() == 1,
+            "The selected Codex account is no longer available"
+        );
+    }
+    if input.native_codex || input.account_id.is_some() {
+        anyhow::ensure!(
+            input.tool_id == Some(ToolId::Codex),
+            "Choose Codex for native auth export"
+        );
+        let mut auths = Vec::new();
+        let mut single_raw = None;
+        let mut warning_count = 0;
+        for (account, dir) in &profiles {
+            if account.api_provider.is_some() {
+                warning_count += 1;
+                continue;
+            }
+            let parsed = (|| -> Result<(String, Value)> {
+                use std::io::Read;
+                let mut raw = String::new();
+                fs::File::open(dir.join("auth.json"))?
+                    .take(1024 * 1024 + 1)
+                    .read_to_string(&mut raw)?;
+                anyhow::ensure!(
+                    raw.len() <= 1024 * 1024,
+                    "Codex auth.json is larger than 1 MB"
+                );
+                let (_, auth) = crate::codex_import::load(&crate::models::CodexAuthSourceInput {
+                    auth_file_path: None,
+                    auth_json: Some(raw.clone()),
+                })?;
+                Ok((raw, auth))
+            })();
+            match parsed {
+                Ok((raw, auth)) => {
+                    if input.account_id.is_some() {
+                        single_raw = Some(raw.into_bytes());
+                    }
+                    auths.push(auth);
+                }
+                Err(_) => warning_count += 1,
+            }
+        }
+        anyhow::ensure!(!auths.is_empty(), "No valid Codex OAuth auth.json is available; API/proxy accounts use credential backups");
+        let account_count = auths.len();
+        let bytes = match single_raw {
+            Some(raw) => raw,
+            None => serde_json::to_vec_pretty(&auths)?,
+        };
+        write_private(&input.path, &bytes)?;
+        return Ok(CredentialsExportResult {
+            path: input.path,
+            account_count,
+            warning_count,
+        });
+    }
+    // Shared usage can contain other identities and local project paths. Account quota remains.
+    let usage = if input.account_id.is_some() {
+        None
+    } else {
+        usage
+    };
     let mut providers: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let mut warning_count = 0;
     let account_count = profiles.len();
@@ -216,11 +297,20 @@ pub fn save(
     let document = json!({
         "format": "michael-le-profiles-credentials", "schemaVersion": 1,
         "appVersion": env!("CARGO_PKG_VERSION"), "exportedAt": chrono::Utc::now().to_rfc3339(),
-        "scope": input.tool_id, "includesHiddenAccounts": input.include_hidden,
+        "scope": input.tool_id, "accountId": input.account_id, "includesHiddenAccounts": input.include_hidden,
         "usageAtExport": usage, "providers": providers,
         "usageAttribution": "Quota is per credential. Session email records the original account when known; provider totals may include shared or unattributed sessions.",
     });
-    let parent = input.path.parent().context("Choose a destination folder")?;
+    write_private(&input.path, &serde_json::to_vec_pretty(&document)?)?;
+    Ok(CredentialsExportResult {
+        path: input.path,
+        account_count,
+        warning_count,
+    })
+}
+
+fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().context("Choose a destination folder")?;
     let temporary = parent.join(format!(".credential-export-{}.tmp", uuid::Uuid::new_v4()));
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -233,18 +323,152 @@ pub fn save(
         let mut file = options
             .open(&temporary)
             .context("Couldn't create the export file")?;
-        file.write_all(&serde_json::to_vec_pretty(&document)?)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
-        fs::rename(&temporary, &input.path).context("Couldn't save the export file")?;
+        fs::rename(&temporary, path).context("Couldn't save the export file")?;
         Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
-    result?;
-    Ok(CredentialsExportResult {
-        path: input.path,
-        account_count,
-        warning_count,
-    })
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(id: &str, tool: &str, hidden: bool) -> Account {
+        serde_json::from_value(json!({
+            "id": id, "toolId": tool, "name": format!("Profile {id}"),
+            "accountEmail": format!("{id}@example.invalid"), "state": "idle",
+            "fingerprint": format!("profile:{id}"), "createdAt": "2026-10-29T00:00:00Z",
+            "updatedAt": "2026-10-29T00:00:00Z", "hidden": hidden
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn single_account_export_round_trips_without_other_accounts_or_shared_usage() {
+        let dir = std::env::temp_dir().join(format!("profile-export-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let raw = r#"{"tokens":{"access_token":"synthetic-access","refresh_token":"synthetic-refresh","account_id":"synthetic-id"}}"#;
+        fs::write(dir.join("auth.json"), raw).unwrap();
+        let path = dir.join("share.json");
+        let input: CredentialsExportInput = serde_json::from_value(json!({
+            "path": path, "toolId": "codex", "accountId": "chosen", "includeHidden": true
+        }))
+        .unwrap();
+        let report = UsageReport {
+            tools: vec![],
+            generated_at: "private-shared-usage".into(),
+            price_status: "unavailable".into(),
+            price_updated_at: None,
+        };
+        let result = save(
+            input,
+            vec![
+                (account("other", "codex", false), dir.clone()),
+                (account("chosen", "codex", true), dir.clone()),
+                (account("claude", "claude", false), dir.clone()),
+            ],
+            Some(report),
+        )
+        .unwrap();
+        assert_eq!(result.account_count, 1);
+        let document: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(document, serde_json::from_str::<Value>(raw).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), raw);
+        let (imported, _) = crate::codex_import::load(&crate::models::CodexAuthSourceInput {
+            auth_file_path: Some(path.clone()),
+            auth_json: None,
+        })
+        .unwrap();
+        assert_eq!(imported, raw);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bulk_native_export_is_array_and_imports_valid_auth_objects() {
+        let dir = std::env::temp_dir().join(format!("bulk-export-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let auth = json!({"tokens":{"access_token":"synthetic", "refresh_token":"synthetic-refresh"}, "last_refresh":"2026-10-29", "extra":{"preserve":true}});
+        fs::write(dir.join("auth.json"), serde_json::to_vec(&auth).unwrap()).unwrap();
+        let path = dir.join("all.json");
+        let input = serde_json::from_value(
+            json!({"path":path,"toolId":"codex","nativeCodex":true,"includeHidden":true}),
+        )
+        .unwrap();
+        let result = save(
+            input,
+            vec![
+                (account("valid", "codex", false), dir.clone()),
+                (account("missing", "codex", true), dir.join("missing")),
+            ],
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.account_count, 1);
+        assert_eq!(result.warning_count, 1);
+        let contents: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(contents, json!([auth]));
+        let backup = crate::credential_import::load(&path, Some(&ToolId::Codex)).unwrap();
+        assert_eq!(backup.accounts.len(), 1);
+        assert_eq!(backup.invalid_count, 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn legacy_export_remains_schema_v1_without_new_request_fields() {
+        let dir = std::env::temp_dir().join(format!("legacy-export-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("all.json");
+        let input =
+            serde_json::from_value(json!({"path":path,"toolId":null,"includeHidden":false}))
+                .unwrap();
+        let result = save(
+            input,
+            vec![
+                (account("shown", "codex", false), dir.clone()),
+                (account("hidden", "codex", true), dir.clone()),
+            ],
+            None,
+        )
+        .unwrap();
+        assert_eq!(result.account_count, 1);
+        assert!(result.warning_count > 0);
+        let contents: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(contents["schemaVersion"], 1);
+        assert_eq!(contents["providers"]["codex"].as_array().unwrap().len(), 1);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn invalid_single_account_scope_does_not_write_a_file() {
+        let path =
+            std::env::temp_dir().join(format!("missing-export-{}.json", uuid::Uuid::new_v4()));
+        for (tool, id, include_hidden) in [
+            (Some("codex"), "missing", true),
+            (Some("claude"), "chosen", true),
+            (None, "chosen", true),
+            (Some("codex"), "chosen", false),
+        ] {
+            let input = serde_json::from_value(json!({"path": path, "toolId": tool, "accountId": id, "includeHidden": include_hidden})).unwrap();
+            assert!(save(
+                input,
+                vec![(account("chosen", "codex", true), path.clone())],
+                None
+            )
+            .is_err());
+            assert!(!path.exists());
+        }
+    }
 }

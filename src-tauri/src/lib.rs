@@ -630,11 +630,13 @@ async fn import_credentials(
     app: tauri::AppHandle,
     path: std::path::PathBuf,
     tool_id: Option<ToolId>,
+    selected_indices: Option<Vec<usize>>,
+    fingerprint: Option<String>,
 ) -> Result<CredentialsImportResult, String> {
     let app2 = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         app2.state::<ManagedState>()
-            .import_credentials(&path, tool_id.as_ref())
+            .import_credentials(&path, tool_id.as_ref(), selected_indices.as_deref(), fingerprint.as_deref())
             .map_err(display_error)
     })
     .await

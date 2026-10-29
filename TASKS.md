@@ -24,7 +24,7 @@ and release delivery; document remaining limitations and evidence with the corre
 | 13 | Dropdown table below the menu-bar icon; expand each account; full-screen UI | Implemented |
 | 14 | Keep the floating overlay, improve its details and minimize like a pet | Implemented; draggable logo bubble and one-click expansion |
 | 15 | Automate a small Hello for eligible Pro/Team/Business accounts | Implemented; app-local scheduler, existing tokens, durable cooldown |
-| 16 | Export credentials by provider or all, raw Codex auth, email and usage | Implemented; private JSON export with unavailable-source notes |
+| 16 | Export credentials by account, provider or all, raw Codex auth, email and usage | Native Codex auth.json object/array export and selectable bulk JSON import implemented in source; no wrapper/config/history. Legacy backups retained. Synthetic round-trip, scope, permissions and changed-file selection checks; installed app unchanged |
 | 17 | Apply the selected account to Codex.app and ChatGPT.app; confirm desktop identity separately | 0.15.2 resolves the owned backend and JSON daemon PID metadata; rejects unrelated CLI controllers. Reachable local handoffs supported; private/unmanaged desktop backends need a safe manual close/apply |
 | 18 | Refresh email/quota immediately and show CLI/Desktop status separately | Implemented; immediate selected-account read, credential watcher and all-window broadcasts; shared-log fallback removed |
 | 19 | Save and recover work interrupted by a desktop account switch | Implemented for reachable local desktop sessions; private durable checkpoint, safe wait, guarded same-thread continuation and uncertain-delivery checks. Unsupported/cloud/ephemeral/native-tool runtimes need attention |

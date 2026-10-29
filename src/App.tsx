@@ -765,6 +765,7 @@ export function App() {
               </div>
             )}
 
+            {currentTool.id === "codex" && <details className="credentialImportPreview"><summary>Import all Codex accounts from JSON</summary><CredentialImportControl notify={notify} initialScope="codex" /></details>}
             {currentTool.id === "codex" && <DesktopStatus snapshot={snapshot} onUpdate={commitSnapshot} />}
             <div className="accountGrid">
               {visibleAccounts.length === 0 ? (
@@ -778,6 +779,7 @@ export function App() {
                   <AccountCard
                     key={account.id}
                     account={account}
+                    notify={notify}
                     tool={currentTool}
                     busy={busy}
                     onPrimeNow={async () => {
@@ -1210,34 +1212,36 @@ function SettingsView({
   );
 }
 
-function CredentialExportButton({ toolId, notify }: { toolId: ToolId | null; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
+function CredentialExportButton({ toolId, account, disabled = false, notify }: { toolId: ToolId | null; account?: Account; disabled?: boolean; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
   const [exporting, setExporting] = useState(false);
-  const label = toolId ? `${toolId === "codex" ? "Codex" : toolId === "claude" ? "Claude" : toolId}` : "all providers";
+  const label = account ? account.name : toolId ? `${toolId === "codex" ? "Codex" : toolId === "claude" ? "Claude" : toolId}` : "all providers";
   const exportFile = async () => {
     setExporting(true);
     try {
-      const path = await saveFileDialog({ title: `Export ${label} credentials (plaintext tokens)`, defaultPath: `michael-profiles-${toolId || "all"}-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: "Credential backup JSON", extensions: ["json"] }] });
+      const path = await saveFileDialog({ title: `Export ${label} credentials (plaintext tokens)`, defaultPath: `michael-profiles-${toolId || "all"}${account ? `-${account.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60) || "account"}` : ""}-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: "Credential backup JSON", extensions: ["json"] }] });
       if (!path) return;
-      const result = await api.exportCredentials(path, toolId, true);
-      notify(`Exported ${result.accountCount} accounts${result.warningCount ? ` · ${result.warningCount} unavailable sources noted in the file` : ""}`, result.warningCount ? "info" : "success");
+      const result = await api.exportCredentials(path, toolId, true, account?.id ?? null);
+      notify(`Exported ${result.accountCount} accounts${result.warningCount ? ` · ${result.warningCount} ${toolId === "codex" ? "invalid/unavailable or API accounts skipped" : "unavailable sources noted in the file"}` : ""}`, result.warningCount ? "info" : "success");
     } catch (error) { notify(errorMessage(error), "error"); }
     finally { setExporting(false); }
   };
-  return <button disabled={exporting} onClick={() => void exportFile()} title="Save raw credentials, email, quota and usage to a private JSON file">{exporting ? <Loader2 className="spin" size={14} /> : <Download size={14} />}Export {label}</button>;
+  return <button disabled={exporting || disabled} onClick={() => void exportFile()} title={toolId === "codex" ? account ? "Export this account as native Codex auth.json." : "Export all Codex OAuth accounts as a JSON array of native auth objects." : "Save raw credentials, email, quota and usage to a private JSON file"}>{exporting ? <Loader2 className="spin" size={14} /> : <Download size={14} />}Export {account ? "auth.json" : toolId === "codex" ? "all Codex auth JSON" : label}</button>;
 }
 
-function CredentialImportControl({ notify }: { notify: (text: string, kind?: "success" | "error" | "info") => void }) {
+function CredentialImportControl({ notify, initialScope = null }: { initialScope?: ToolId | null; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
   const [path, setPath] = useState<string | null>(null);
   const [preview, setPreview] = useState<CredentialsImportPreview | null>(null);
-  const [scope, setScope] = useState<ToolId | null>(null);
+  const [excluded, setExcluded] = useState<number[]>([]);
+  const [scope, setScope] = useState<ToolId | null>(initialScope);
   const [busy, setBusy] = useState(false);
   const chooseFile = async () => {
     setBusy(true);
     setPath(null);
     setPreview(null);
+    setExcluded([]);
     try {
       const selected = await openFileDialog({
-        title: "Choose a Michael Le Profiles credential backup",
+        title: "Import Codex auth JSON (one account or array) / credential backup",
         multiple: false,
         filters: [{ name: "Credential backup JSON", extensions: ["json"] }],
       });
@@ -1254,6 +1258,7 @@ function CredentialImportControl({ notify }: { notify: (text: string, kind?: "su
   const changeScope = async (value: string) => {
     const next = value === "all" ? null : (value as ToolId);
     setScope(next);
+    setExcluded([]);
     if (!path) return;
     setBusy(true);
     setPreview(null);
@@ -1269,7 +1274,9 @@ function CredentialImportControl({ notify }: { notify: (text: string, kind?: "su
     if (!path || !preview || preview.accounts.every((account) => account.alreadyAdded)) return;
     setBusy(true);
     try {
-      const result = await api.importCredentials(path, scope);
+      const selected = preview.accounts.flatMap((account, index) => !account.alreadyAdded && !excluded.includes(index) ? [index] : []);
+      if (!selected.length) return;
+      const result = await api.importCredentials(path, scope, selected, preview.fingerprint);
       const details = [
         result.duplicateCount ? `${result.duplicateCount} duplicate${result.duplicateCount === 1 ? "" : "s"} skipped` : "",
         result.unsupportedCount ? `${result.unsupportedCount} unsupported provider account${result.unsupportedCount === 1 ? "" : "s"} skipped` : "",
@@ -1289,11 +1296,11 @@ function CredentialImportControl({ notify }: { notify: (text: string, kind?: "su
       setBusy(false);
     }
   };
-  const readyCount = preview?.accounts.filter((account) => !account.alreadyAdded).length ?? 0;
+  const readyCount = preview?.accounts.filter((account, index) => !account.alreadyAdded && !excluded.includes(index)).length ?? 0;
   return <div className="credentialImportControl">
     <button type="button" disabled={busy} onClick={() => void chooseFile()}>
       {busy ? <Loader2 className="spin" size={14} /> : <Upload size={14} />}
-      {path ? "Choose another JSON file" : "Choose JSON backup"}
+      {path ? "Choose another JSON file" : "Import all / Choose JSON"}
     </button>
     {path && <span className="muted credentialImportFile">{path.split(/[\\/]/).pop()}</span>}
     {path && <label className="credentialImportScope">Provider scope
@@ -1305,6 +1312,7 @@ function CredentialImportControl({ notify }: { notify: (text: string, kind?: "su
     </label>}
     {preview && <div className="credentialImportPreview">
       {preview.accounts.length > 0 ? <ul>{preview.accounts.map((account, index) => <li key={`${account.toolId}-${account.name}-${index}`}>
+        <input type="checkbox" aria-label={`Import ${account.email || account.name}`} disabled={busy || account.alreadyAdded} checked={!account.alreadyAdded && !excluded.includes(index)} onChange={(event) => setExcluded((current) => event.target.checked ? current.filter((item) => item !== index) : [...current, index])} />
         <span><strong>{account.toolId === "codex" ? "Codex" : "Claude Code"} · {account.name || "Imported account"}</strong><small>{account.email || account.kind}</small></span>
         <em className={account.alreadyAdded ? "alreadyAdded" : ""}>{account.alreadyAdded ? "Already on this Mac" : account.kind}</em>
       </li>)}</ul> : <p>No importable Codex or Claude Code accounts found in this file.</p>}
@@ -2567,6 +2575,7 @@ function CliSetupBar({
 
 function AccountCard({
   account,
+  notify,
   tool,
   busy,
   onPrimeNow,
@@ -2584,6 +2593,7 @@ function AccountCard({
   refreshingToken,
 }: {
   account: Account;
+  notify: (text: string, kind?: "success" | "error" | "info") => void;
   tool: ToolStatus;
   busy: string | null;
   onPrimeNow: () => void;
@@ -2804,6 +2814,9 @@ function AccountCard({
           >
             <EyeOff />
           </button>
+        )}
+        {tool.id === "codex" && !isApi && (
+          <CredentialExportButton toolId="codex" account={account} disabled={busy !== null} notify={notify} />
         )}
         {!account.isDefault && !isVirtualApi && (
           <button className="iconButton danger" onClick={onDelete} disabled={busy !== null} title="Delete">

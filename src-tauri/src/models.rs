@@ -708,6 +708,10 @@ pub struct AutoPrimeRecord {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialsExportInput {
+    #[serde(default)]
+    pub native_codex: bool,
+    #[serde(default)]
+    pub account_id: Option<String>,
     pub path: std::path::PathBuf,
     pub tool_id: Option<ToolId>,
     pub include_hidden: bool,
@@ -734,6 +738,7 @@ pub struct CredentialsImportPreviewAccount {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialsImportPreview {
+    pub fingerprint: String,
     pub accounts: Vec<CredentialsImportPreviewAccount>,
     pub unsupported_count: usize,
     pub unavailable_count: usize,

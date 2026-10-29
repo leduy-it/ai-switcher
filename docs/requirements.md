@@ -255,6 +255,8 @@ Acceptance: enable/pause and account filters work; a restart or uncertain respon
 Requirements:
 
 - Export one provider or all providers from the GUI, including hidden accounts.
+- Export a Codex OAuth account as a native auth.json object; Export all Codex auth JSON writes an array of those objects. No custom wrapper, account metadata, config, quota or usage is added. Bulk export includes hidden/default OAuth accounts, skips unavailable/API sources with a reported count, and fails when no valid auth exists. Unknown or mismatched account IDs fail without writing. Legacy provider/all credential backups remain supported.
+- Import a native auth object or array through the JSON import control, preview metadata only and allow per-account selection. Validate every entry, skip invalid and duplicate logins, and reject selected imports if the file changed since preview.
 - Include a format/schema version, export timestamp, provider/profile identity, available account email/plan, relevant settings, available quota and usage snapshot with its timestamp.
 - Include raw credential sources and parsed fields, including raw Codex auth.json when available. Preserve provider distinctions and field names needed by a future importer.
 - Omit the source computer's absolute profile directory from shareable backup JSON.

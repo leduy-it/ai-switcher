@@ -43,3 +43,5 @@ Conclude with:
 Do not claim parity, conflict elimination, successful installation or task completion without evidence. Do not start implementation during this audit.
 
 For Codex auth imports, verify Unicode clipboard whitespace repair outside quoted strings, exact credential preservation, unchanged source files and metadata-only previews. Check that live quota includes the selected workspace and that rejected credentials remain an actionable sign-in error; parsing/import must not be described as successful live authentication or token renewal.
+
+For requirement 16, verify individual Codex export is native auth.json and bulk export is an array of native auth objects without a custom wrapper or config/history. Check selectable bulk import, changed-file rejection, invalid/duplicate skip and legacy backup compatibility.

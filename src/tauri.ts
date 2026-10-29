@@ -699,9 +699,9 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
 export const api = {
   getAutoPrimeSettings: () => invoke<AutoPrimeSettings>("get_auto_prime_settings"),
   setAutoPrimeSettings: (input: AutoPrimeSettings) => invoke<AutoPrimeSettings>("set_auto_prime_settings", { input }),
-  exportCredentials: (path: string, toolId: ToolId | null, includeHidden: boolean) => invoke<CredentialsExportResult>("export_credentials", { input: { path, toolId, includeHidden } }),
+  exportCredentials: (path: string, toolId: ToolId | null, includeHidden: boolean, accountId: string | null = null) => invoke<CredentialsExportResult>("export_credentials", { input: { path, toolId, includeHidden, accountId, nativeCodex: toolId === "codex" } }),
   previewCredentialsImport: (path: string, toolId: ToolId | null) => invoke<CredentialsImportPreview>("preview_credentials_import", { path, toolId }),
-  importCredentials: (path: string, toolId: ToolId | null) => invoke<CredentialsImportResult>("import_credentials", { path, toolId }),
+  importCredentials: (path: string, toolId: ToolId | null, selectedIndices: number[] | null = null, fingerprint: string | null = null) => invoke<CredentialsImportResult>("import_credentials", { path, toolId, selectedIndices, fingerprint }),
   openQuotaPanel: () => invoke<void>("open_quota_panel"),
   closeQuotaPanel: () => invoke<void>("close_quota_panel"),
   openMainWindow: (fullscreen = false) => invoke<void>("open_main_window", { fullscreen }),
