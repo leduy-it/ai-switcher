@@ -303,7 +303,7 @@ Requirements:
 - Inspect the desktop-owned bundled app-server child when the GUI process omits profile environment
   variables. Support numeric and JSON daemon PID metadata. Do not treat a separate CLI daemon as
   the desktop's private backend; inability to control that backend must remain explicit.
-- Wait for active work by default. Use normal macOS quit and a controlled relaunch, with explicit profile/catalog and desktop-data paths.
+- With desktop sync enabled, offer Restart & continue active chats (enabled for the owner’s requested desktop-first workflow). Automatically checkpoint/interrupt only when the installed app supports the versioned native updater continuation contract; otherwise wait for active work. Use normal macOS quit and a controlled relaunch, with explicit profile/catalog and desktop-data paths.
 - Preserve session/sidebar/project state. Never copy or symlink auth.json into a shared credential location to perform a handoff.
 - If two installed brands share the same live data directory, use one at a time and disclose that limitation.
 - Unknown/unmanaged execution profiles wait for the user to finish and close them. Do not interrupt unrelated CLI clients or force-quit active apps.
@@ -320,6 +320,7 @@ Requirements:
 - Refresh only the affected identity and broadcast the updated snapshot to main app, dropdown and overlay.
 - Display CLI selected, desktop pending/waiting, desktop confirmed and failure states separately.
 - Invalidate a stale desktop identity confirmation after a credential change or failed verification.
+- Reconcile enabled desktop sync at manager startup, and queue it directly after an automatic quota selection. A pending recovery with saved sessions blocks further account rotation.
 - With desktop sync enabled, an external CLI selection or selected-profile credential mismatch queues
   a controlled reload. Token changes that still match the backend identity do not restart it.
   Existing pending/error recovery operations remain available for explicit resolution.
@@ -330,12 +331,12 @@ Acceptance: an authorized account switch shows the new selected quota promptly. 
 
 Requirements:
 
-- Default to waiting for active turns to finish.
-- An explicit Switch now and recover action may checkpoint and interrupt eligible local desktop work.
+- Restart & continue uses native desktop continuation when the installed version and reachable local backend support it. Disable that option to wait for active turns. Private/unmanaged stdio runtimes remain explicit limitations; detecting the native marker format alone does not prove a live native handoff.
+- An explicit Switch now and recover action may checkpoint and interrupt eligible local desktop work. Native automatic recovery preflights target account/user IDs, thread IDs and pending resume markers before any interruption; repeats checks after normal exit; stages a one-shot account-bound marker with a 15-minute expiry. The desktop owns the empty continuation turn and its client tools.
 - Save a private durable checkpoint before interruption: operation, host/app, thread/turn, cwd/worktree, old/new profile, model, execution/approval/sandbox policies, terminal metadata and last recorded results.
 - Confirm the interruption and new desktop identity before continuing in the original thread.
 - Preserve execution context; ask the resumed agent to inspect actual files/processes and continue after the last completed step.
-- Persist send intent and acknowledgement. Check original history after uncertain delivery and never blindly resend a continuation.
+- Persist send intent and acknowledgement. Check original history after uncertain delivery and never blindly resend a continuation. Native retries only observe existing continuation; never restage an uncertain native request. New failed/stopped turns are not reported as successfully continued.
 - Do not automatically resume completed work, a user-stopped/resumed session, pending approvals, inaccessible cloud work, ephemeral sessions or unsupported client-owned tool runtimes. Uncertain external effects need attention.
 - Show waiting, checkpointing, switching, restoring, continuation acknowledged and error states per session. Provide cancellation while waiting, original-session access and safe retry.
 - Continuation acknowledgement is not task completion; terminal/RAM state is not promised restored.

@@ -705,7 +705,7 @@ export function App() {
                   {currentTool.id !== "antigravity" && currentAutoSwitch.enabled && (
                     <span
                       className="autoChip"
-                      title={`Auto-switch the bare ${currentTool.id} command at ${currentAutoSwitch.threshold}% quota`}
+                      title={`Select another ${currentTool.id} account at ${currentAutoSwitch.threshold}% quota; enabled desktop sync also queues a verified restart`}
                     >
                       <Zap />
                       Auto {currentAutoSwitch.threshold}%

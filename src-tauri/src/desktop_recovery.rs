@@ -20,6 +20,10 @@ struct Operation {
     target_home: PathBuf,
     shared_home: PathBuf,
     force: bool,
+    #[serde(default)]
+    native_resume: bool,
+    #[serde(default)]
+    native_queued_at: Option<String>,
     sessions: Vec<Session>,
 }
 
@@ -141,7 +145,9 @@ pub fn request(state: &ManagedState, settings: DesktopSyncSettings) -> Result<()
         settings: settings.clone(),
         target_home,
         shared_home,
-        force: false,
+        force: settings.resume_active_sessions && crate::desktop::supports_native_resume(&settings.app),
+        native_resume: settings.resume_active_sessions && crate::desktop::supports_native_resume(&settings.app),
+        native_queued_at: None,
         sessions: vec![],
     };
     {
@@ -173,7 +179,9 @@ pub fn action(state: &ManagedState, action: &str) -> Result<()> {
                 "Will checkpoint eligible sessions and interrupt them with recovery".into();
         }
         "retry" if op.view.phase == "needsAttention" => {
-            op.view.phase = if op.sessions.iter().any(|s| {
+            op.view.phase = if op.native_queued_at.is_some() {
+                "restoring"
+            } else if op.sessions.iter().any(|s| {
                 s.interrupt_requested
                     && !["acknowledged", "dismissed"].contains(&s.send_state.as_str())
             }) {
@@ -302,6 +310,10 @@ fn advance(state: &ManagedState, op: &mut Operation, app: &tauri::AppHandle) -> 
     if op.force {
         anyhow::ensure!(loaded.iter().all(|(_, _, t)| safe_thread(t)), "An active session is ephemeral, needs input/approval, or belongs to another client. Finish it before switching; nothing was interrupted");
     }
+    if op.force && op.native_resume && !loaded.is_empty() {
+        let ids = loaded.iter().filter_map(|(_, _, thread)| thread["id"].as_str().map(str::to_owned)).collect::<Vec<_>>();
+        crate::desktop::preflight_native_resume(&op.settings.app, &op.target_home, &ids)?;
+    }
     // Catalog repair may restart the destination profile's daemon. Never interrupt its unrelated
     // CLI work just because its desktop is closed.
     if crate::desktop::backend_requires_restart(&current, &shared) {
@@ -317,7 +329,8 @@ fn advance(state: &ManagedState, op: &mut Operation, app: &tauri::AppHandle) -> 
             .verify_desktop_identity(&op.target_home, &op.view.target_account_id)
             .is_err()
         {
-            state.perform_desktop_handoff(op.settings.clone(), &op.view.target_account_id)?;
+            anyhow::ensure!(op.native_queued_at.is_none(), "Native continuation was already queued. Verify the desktop account and original chats; retry will not send it twice");
+            state.perform_desktop_handoff(op.settings.clone(), &op.view.target_account_id, None)?;
         }
         op.view.phase = "restoring".into();
         save(state, op, Some(app))?;
@@ -349,7 +362,11 @@ fn advance(state: &ManagedState, op: &mut Operation, app: &tauri::AppHandle) -> 
             .as_str()
             .context("Active turn has no ID")?
             .to_string();
-        anyhow::ensure!(!turn["items"].as_array().is_some_and(|a| a.iter().any(|i| ["mcpToolCall", "dynamicToolCall"].contains(&i["type"].as_str().unwrap_or_default()) && i["status"] == "inProgress")), "An external tool is in progress. Wait for its result; recovery will not repeat an unknown external action");
+        if turn["items"].as_array().is_some_and(|a| a.iter().any(|i| ["mcpToolCall", "dynamicToolCall"].contains(&i["type"].as_str().unwrap_or_default()) && i["status"] == "inProgress")) {
+            op.view.phase = "waiting".into();
+            op.view.message = "Waiting for an external tool result before checkpoint/restart; no work has been interrupted".into();
+            return save(state, op, Some(app));
+        }
         let config = client.request(
             "thread/resume",
             json!({"threadId":full["id"],"excludeTurns":true}),
@@ -368,7 +385,7 @@ fn advance(state: &ManagedState, op: &mut Operation, app: &tauri::AppHandle) -> 
                 .transpose()?
                 .unwrap_or_default();
             let metadata: Value = serde_json::from_str(&first)?;
-            anyhow::ensure!(!metadata["payload"]["dynamic_tools"].as_array().is_some_and(|a| !a.is_empty()), "This session needs native client-owned tools. Finish it before switching; Switcher cannot reconstruct that tool runtime");
+            anyhow::ensure!(op.native_resume || !metadata["payload"]["dynamic_tools"].as_array().is_some_and(|a| !a.is_empty()), "This session needs native client-owned tools. Finish it before switching; Switcher cannot reconstruct that tool runtime");
         } else {
             anyhow::bail!("Session has no durable local history; finish it before switching");
         }
@@ -462,7 +479,16 @@ fn advance(state: &ManagedState, op: &mut Operation, app: &tauri::AppHandle) -> 
     op.view.phase = "switching".into();
     op.view.message = "Applying profile and verifying the desktop backend account".into();
     save(state, op, Some(app))?;
-    state.perform_desktop_handoff(op.settings.clone(), &op.view.target_account_id)?;
+    let native_threads: Vec<_> = if op.native_resume {
+        op.sessions.iter().filter(|s| s.interrupted && s.send_state != "dismissed").map(|s| s.view.thread_id.clone()).collect()
+    } else { vec![] };
+    if !native_threads.is_empty() {
+        op.native_queued_at = Some(now());
+        for session in op.sessions.iter_mut().filter(|s| s.interrupted && s.send_state != "dismissed") { session.send_state = "nativeQueued".into(); }
+        // Persist intent first. Retries must never restage an uncertain native continuation.
+        save(state, op, Some(app))?;
+    }
+    state.perform_desktop_handoff(op.settings.clone(), &op.view.target_account_id, (!native_threads.is_empty()).then_some(native_threads.as_slice()))?;
     op.view.phase = "restoring".into();
     op.view.message = "Account confirmed; checking interrupted sessions".into();
     save(state, op, Some(app))?;
@@ -483,6 +509,23 @@ fn restore(state: &ManagedState, op: &mut Operation, app: &tauri::AppHandle) -> 
         let latest = client.request("thread/read", json!({"threadId":id,"includeTurns":true}))?
             ["thread"]
             .clone();
+        if op.sessions[index].send_state == "nativeQueued" {
+            let latest_turn = latest["turns"].as_array().and_then(|turns| turns.last());
+            let changed = latest_turn.is_some_and(|turn| turn["id"].as_str().is_some_and(|id| id != op.sessions[index].turn_id));
+            anyhow::ensure!(!changed || latest_turn.is_some_and(|turn| ["inProgress", "completed"].contains(&turn["status"].as_str().unwrap_or_default())), "The original chat has a newer failed/stopped turn. Open it to review; no automatic continuation was repeated");
+            let newer = changed;
+            if newer {
+                op.sessions[index].send_state = "acknowledged".into();
+                op.sessions[index].view.phase = "continued".into();
+                op.sessions[index].view.message = "Original thread has new activity after native relaunch; no extra prompt was sent".into();
+                save(state, op, Some(app))?;
+                continue;
+            }
+            let elapsed = op.native_queued_at.as_ref().and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok()).map(|at| chrono::Utc::now().signed_duration_since(at).num_seconds()).unwrap_or(61);
+            anyhow::ensure!(elapsed < 60, "Native desktop continuation has not been confirmed. Open the original chats; no duplicate continuation was sent");
+            op.view.message = "Account confirmed; waiting for native desktop continuation".into();
+            return save(state, op, Some(app));
+        }
         if !op.sessions[index].interrupted {
             let status = latest["turns"]
                 .as_array()
@@ -610,5 +653,33 @@ pub fn recover_after_restart(state: &ManagedState) {
             op.view.message = "Switcher restarted during a handoff. The checkpoint is preserved; retry will verify account, interruption and delivery before continuing".into();
             let _ = save(state, &mut op, None);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_retry_only_observes_and_never_restarts_or_restages() {
+        let root = std::env::temp_dir().join(format!("native-retry-{}", uuid::Uuid::new_v4()));
+        let data = crate::store::StoredState::default();
+        let state = ManagedState {
+            store: crate::store::Store::for_test(root.clone()).unwrap(),
+            api_server: std::sync::Mutex::new(crate::api_gateway::ApiServerHandle::stopped(&data.api_gateway)),
+            data: std::sync::Mutex::new(data), usage_scan: std::sync::Mutex::new(()), account_switch: std::sync::Mutex::new(()),
+            priming: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        let queued = now();
+        let mut op = Operation {
+            view: DesktopOperationView { id: uuid::Uuid::new_v4().to_string(), phase: "needsAttention".into(), ..Default::default() },
+            settings: DesktopSyncSettings::default(), target_home: root.join("target"), shared_home: root.clone(),
+            force: true, native_resume: true, native_queued_at: Some(queued.clone()), sessions: vec![],
+        };
+        save(&state, &mut op, None).unwrap();
+        action(&state, "retry").unwrap();
+        let restored = load(&state).unwrap().unwrap();
+        assert_eq!(restored.view.phase, "restoring");
+        assert_eq!(restored.native_queued_at.as_deref(), Some(queued.as_str()));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

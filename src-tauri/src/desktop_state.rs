@@ -380,3 +380,139 @@ mod tests {
         Ok(())
     }
 }
+
+/// Call only after the outgoing desktop has exited normally. The desktop consumes this
+/// versioned one-shot marker, verifies its own account identity, and starts native empty turns.
+fn native_resume_state(
+    profile: &Path,
+    account_id: &str,
+    user_id: &str,
+    threads: &[String],
+) -> Result<Value> {
+    anyhow::ensure!(
+        !account_id.trim().is_empty() && !user_id.trim().is_empty(),
+        "Native desktop continuation needs a verified account and user identity"
+    );
+    anyhow::ensure!(
+        !threads.is_empty() && threads.iter().all(|id| uuid::Uuid::parse_str(id).is_ok()),
+        "Native desktop continuation needs valid local thread IDs"
+    );
+    let path = profile.join(STATE);
+    let mut state = read(&path)?;
+    let atoms = state
+        .as_object_mut()
+        .unwrap()
+        .entry("electron-persisted-atom-state")
+        .or_insert_with(|| json!({}));
+    let atoms = atoms
+        .as_object_mut()
+        .context("Unsupported desktop atom state; continuation was not queued")?;
+    let now = chrono::Utc::now().timestamp_millis();
+    anyhow::ensure!(
+        !atoms
+            .get("update-resume-state-v1")
+            .is_some_and(|old| !old.is_null()
+                && old["expiresAtMs"]
+                    .as_i64()
+                    .is_none_or(|deadline| deadline > now)),
+        "A native desktop continuation is already pending; it was left untouched"
+    );
+    let ids: std::collections::BTreeSet<_> = threads.iter().cloned().collect();
+    atoms.insert("update-resume-state-v1".into(), json!({"accountId":account_id,"userId":user_id,"threadIds":ids,"expiresAtMs":now + 15 * 60 * 1000}));
+    Ok(state)
+}
+
+pub fn validate_native_resume(
+    profile: &Path,
+    account_id: &str,
+    user_id: &str,
+    threads: &[String],
+) -> Result<()> {
+    native_resume_state(profile, account_id, user_id, threads).map(|_| ())
+}
+
+pub fn stage_native_resume(
+    profile: &Path,
+    shared: &Path,
+    account_id: &str,
+    user_id: &str,
+    threads: &[String],
+) -> Result<()> {
+    let state = native_resume_state(profile, account_id, user_id, threads)?;
+    save(&profile.join(STATE), &state, shared)
+}
+
+#[cfg(test)]
+mod native_resume_tests {
+    use super::*;
+
+    #[test]
+    fn native_preflight_rejects_before_any_state_mutation() {
+        let root = std::env::temp_dir().join(format!("native-preflight-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let thread = uuid::Uuid::new_v4().to_string();
+        assert!(validate_native_resume(&root, "", "user", &[thread.clone()]).is_err());
+        assert!(!root.join(STATE).exists());
+        assert!(!root.join("backups").exists());
+        fs::write(root.join(STATE), br#"{"electron-persisted-atom-state":{"update-resume-state-v1":{"expiresAtMs":9223372036854775807}}}"#).unwrap();
+        let before = fs::read(root.join(STATE)).unwrap();
+        assert!(validate_native_resume(&root, "account", "user", &[thread]).is_err());
+        assert_eq!(fs::read(root.join(STATE)).unwrap(), before);
+        assert!(!root.join("backups").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_resume_is_bound_to_destination_and_preserves_other_state() {
+        let root = std::env::temp_dir().join(format!("native-resume-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join(STATE),
+            br#"{"electron-persisted-atom-state":{"other":42},"local-projects":{"keep":{}}}"#,
+        )
+        .unwrap();
+        let thread = uuid::Uuid::new_v4().to_string();
+        stage_native_resume(
+            &root,
+            &root,
+            "target-account",
+            "target-user",
+            &[thread.clone()],
+        )
+        .unwrap();
+        let state = read(&root.join(STATE)).unwrap();
+        assert_eq!(state["electron-persisted-atom-state"]["other"], 42);
+        let resume = &state["electron-persisted-atom-state"]["update-resume-state-v1"];
+        assert_eq!(resume["accountId"], "target-account");
+        assert_eq!(resume["userId"], "target-user");
+        assert_eq!(resume["threadIds"], json!([thread]));
+        assert!(resume["expiresAtMs"].as_i64().unwrap() > chrono::Utc::now().timestamp_millis());
+        assert!(stage_native_resume(
+            &root,
+            &root,
+            "target-account",
+            "target-user",
+            &[uuid::Uuid::new_v4().to_string()]
+        )
+        .is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_resume_rejects_missing_identity_and_invalid_threads() {
+        let root =
+            std::env::temp_dir().join(format!("native-resume-invalid-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        assert!(stage_native_resume(
+            &root,
+            &root,
+            "",
+            "user",
+            &[uuid::Uuid::new_v4().to_string()]
+        )
+        .is_err());
+        assert!(stage_native_resume(&root, &root, "account", "user", &["invalid".into()]).is_err());
+        assert!(!root.join(STATE).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+}

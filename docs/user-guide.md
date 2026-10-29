@@ -237,3 +237,11 @@ Michael Le maintains this fork and its visual identity. The underlying project w
 The app retains its existing local profile-data and macOS Keychain service identifiers so saved
 accounts and credentials remain available after the rebrand. Those identifiers are internal
 compatibility details; the app is presented and maintained as Michael Le Profiles.
+
+## Desktop-first quota handoff
+
+Enable Codex auto-switch at your preferred threshold and **Apply desktop when selecting an account**. Choose the installed desktop brand you use. **Restart & continue active chats** enables checkpointing and native continuation on supported desktop versions with an inspectable local backend. Disable it to wait for active work. Quota polling selects only measured healthy subscription accounts, and the UI distinguishes account selection, pending restart and confirmed backend identity.
+
+The native path follows the installed app’s update recovery contract: after normal exit, stage a private one-shot marker for eligible interrupted thread IDs and the destination account/user. The desktop starts its own continuation turns. A retry observes prior delivery instead of sending a second prompt. Failed/stopped newer turns and unconfirmed continuation need attention.
+
+Private/unmanaged stdio backends cannot be inspected or controlled by the manager. They may require finishing/closing the desktop manually before a managed launch. Native state-format checks and isolated backend tests do not prove live native UI/tool recovery. The current running desktop was not stopped during development.

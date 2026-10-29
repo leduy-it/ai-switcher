@@ -160,7 +160,7 @@ export interface AppSnapshot {
 }
 
 export type DesktopApp = "codex" | "chatgpt";
-export interface DesktopSyncSettings { enabled: boolean; app: DesktopApp }
+export interface DesktopSyncSettings { enabled: boolean; app: DesktopApp; resumeActiveSessions?: boolean }
 export interface DesktopRuntime { app: DesktopApp; installed: boolean; running: boolean; pid: number | null; backendPid?: number | null; usesDaemonProxy?: boolean; profileHome: string | null; sessionHome: string | null }
 export interface DesktopSessionView { threadId: string; name: string; cwd: string; phase: string; message: string }
 export interface DesktopOperationView { id: string; phase: string; message: string; targetAccountId: string; sessions: DesktopSessionView[]; updatedAt: string }

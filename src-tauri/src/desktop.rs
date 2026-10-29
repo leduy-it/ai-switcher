@@ -260,12 +260,55 @@ pub fn backend_catalog_home(profile: &Path) -> Option<PathBuf> {
     (home == profile).then_some(sqlite)
 }
 
+/// Detect the versioned native updater contract in the installed desktop without executing it.
+pub fn supports_native_resume(app: &DesktopApp) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(bundle(app).join("Contents/Resources/app.asar")) else { return false; };
+    let markers: [&[u8]; 3] = [b"update-resume-state-v1", b"takeResumeState", b"app_update_resume"];
+    let mut found = [false; 3];
+    let mut tail = Vec::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let Ok(count) = file.read(&mut buffer) else { return false; };
+        if count == 0 { return found.iter().all(|value| *value); }
+        tail.extend_from_slice(&buffer[..count]);
+        for (index, marker) in markers.iter().enumerate() { found[index] |= tail.windows(marker.len()).any(|window| window == *marker); }
+        if found.iter().all(|value| *value) { return true; }
+        if tail.len() > 64 { tail.drain(..tail.len()-64); }
+    }
+}
+
+pub fn can_reuse_running_desktop(running: bool, needs_refresh: bool, identity_matches: bool, resume_threads: Option<&[String]>) -> bool {
+    running && !needs_refresh && identity_matches && resume_threads.is_none_or(|threads| threads.is_empty())
+}
+
+pub fn preflight_native_resume(app: &DesktopApp, profile: &Path, threads: &[String]) -> Result<(String, String)> {
+    anyhow::ensure!(supports_native_resume(app), "This desktop version does not support native continuation");
+    let (_, auth) = crate::codex_import::load(&crate::models::CodexAuthSourceInput { auth_file_path: Some(profile.join("auth.json")), auth_json: None })?;
+    let account = crate::quota::codex_account_id_from_auth(&auth).context("Native continuation needs an account ID")?;
+    let user = crate::quota::codex_user_id_from_auth(&auth).context("Native continuation needs a user ID")?;
+    crate::desktop_state::validate_native_resume(profile, &account, &user, threads)?;
+    Ok((account, user))
+}
+
+#[cfg(test)]
+mod native_handoff_tests {
+    #[test]
+    fn pending_native_resume_never_reuses_running_desktop() {
+        assert!(!super::can_reuse_running_desktop(true,false,true,Some(&["thread".into()])));
+        assert!(super::can_reuse_running_desktop(true,false,true,None));
+        assert!(!super::can_reuse_running_desktop(true,true,true,None));
+        assert!(!super::can_reuse_running_desktop(true,false,false,None));
+    }
+}
+
 pub fn apply(
     settings: &DesktopSyncSettings,
     profile: &Path,
     shared: &Path,
     api: bool,
     state_profiles: &[PathBuf],
+    resume_threads: Option<&[String]>,
 ) -> Result<()> {
     #[cfg(not(target_os = "macos"))]
     anyhow::bail!("Desktop switching currently supports macOS");
@@ -377,6 +420,10 @@ pub fn apply(
                         }
                     }
                 }
+        }
+        if let Some(threads) = resume_threads.filter(|threads| !threads.is_empty()) {
+            let (account, user) = preflight_native_resume(&settings.app, profile, threads)?;
+            crate::desktop_state::stage_native_resume(profile, shared, &account, &user, threads)?;
         }
         let user_data = crate::tools::home_dir().join("Library/Application Support/Codex");
         std::fs::create_dir_all(&user_data)?;

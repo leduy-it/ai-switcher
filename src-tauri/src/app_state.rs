@@ -2239,6 +2239,10 @@ impl ManagedState {
                 .data
                 .lock()
                 .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            if *tool_id == ToolId::Codex && data.desktop_sync.settings.enabled
+                && data.desktop_sync.operation.as_ref().is_some_and(|op| !["applied", "cancelled"].contains(&op.phase.as_str()) && !op.sessions.is_empty()) {
+                return Ok(());
+            }
             // Resolve the account in use from the active-profile file, NOT from `state == Active`:
             // an account that just hit 100% is marked `Exhausted`, so matching on `Active` misses
             // exactly the case auto-switch exists for.
@@ -2295,11 +2299,25 @@ impl ManagedState {
             name
         };
 
+        let desktop_settings = self.data.lock().ok().and_then(|data| (*tool_id == ToolId::Codex && data.desktop_sync.settings.enabled).then(|| data.desktop_sync.settings.clone()));
+        let desktop_message = if let Some(settings) = desktop_settings {
+            match self.apply_desktop_inner(settings) {
+                Ok(()) => "Desktop restart and account verification queued.",
+                Err(error) => {
+                    if let Ok(mut data) = self.data.lock() {
+                        data.desktop_sync.error = Some(format!("Account selected; desktop handoff could not be queued: {error:#}"));
+                        let _ = self.store.save(&data);
+                    }
+                    "Desktop handoff needs attention in Michael Le Profiles."
+                }
+            }
+        } else { "Open a new terminal to apply." };
         if let Some(app) = app {
             let message = format!(
-                "{} is out of quota — auto-switched to {}. Open a new terminal to apply.",
+                "{} reached its quota threshold — selected {}. {}",
                 tool_id.display_name(),
-                switched_name
+                switched_name,
+                desktop_message
             );
             let _ = app
                 .notification()
@@ -3443,6 +3461,7 @@ impl ManagedState {
         &self,
         settings: crate::models::DesktopSyncSettings,
         expected_id: &str,
+        resume_threads: Option<&[String]>,
     ) -> Result<()> {
         let (account, profile, shared) = self.desktop_selected_target()?;
         anyhow::ensure!(
@@ -3477,7 +3496,7 @@ impl ManagedState {
                 });
                 let needs_refresh = migration.catalog_threads > 0
                     || crate::desktop_state::needs_refresh(&profile, &shared)?;
-                if already_running && !needs_refresh && self.verify_desktop_identity(&profile, &account.id).is_ok() {
+                if crate::desktop::can_reuse_running_desktop(already_running, needs_refresh, already_running && !needs_refresh && self.verify_desktop_identity(&profile, &account.id).is_ok(), resume_threads) {
                     Ok(())
                 } else {
                     let state_profiles = {
@@ -3488,7 +3507,7 @@ impl ManagedState {
                             .filter(|p| p.is_dir())
                             .collect::<Vec<_>>()
                     };
-                    crate::desktop::apply(&settings, &profile, &shared, false, &state_profiles)
+                    crate::desktop::apply(&settings, &profile, &shared, false, &state_profiles, resume_threads)
                         .and_then(|_| self.verify_desktop_identity(&profile, &account.id))
                 }
             })()
@@ -3610,6 +3629,7 @@ impl ManagedState {
                 changed.push(id.clone());
             }
         }
+        let initial_watch = !seen.contains_key("cli-active-profile");
         let selected_key = std::fs::read_to_string(self.store.active_profile_path(&ToolId::Codex))
             .unwrap_or_default();
         let selected_changed = seen
@@ -3661,12 +3681,13 @@ impl ManagedState {
                 }
             }
         }
-        if selected_changed || desktop_mismatch {
+        if initial_watch || selected_changed || desktop_mismatch {
             if let Ok(_guard) = self.account_switch.lock() {
                 let settings = self.data.lock().ok().and_then(|data| {
                     let pending =
                         data.desktop_sync.operation.as_ref().is_some_and(|op| {
                             !["applied", "cancelled"].contains(&op.phase.as_str())
+                                && (op.phase != "needsAttention" || !op.sessions.is_empty())
                         });
                     (data.desktop_sync.settings.enabled && !pending)
                         .then(|| data.desktop_sync.settings.clone())

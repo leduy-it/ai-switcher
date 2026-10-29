@@ -108,10 +108,10 @@
 - Resolve the desktop-owned bundled app-server process, not an arbitrary daemon sharing its home.
   Daemon PID records may be JSON. Reject control of a private desktop through an unrelated CLI
   daemon; isolated subprocess tests do not validate native client-owned tool continuation.
-- Default handoffs wait for active turns. Unknown/unmanaged desktop execution homes wait until
+- The owner requested desktop-first restart/continuation. With Restart & continue enabled, preflight and checkpoint eligible turns, then use the versioned native updater continuation contract when supported. Disable the option to wait for active turns. Unknown/unmanaged desktop execution homes wait until
   closed. Do not force-quit apps, interrupt unrelated CLI sessions, or reconstruct ephemeral/cloud
   or native client-owned tool runtimes. Native brands share one desktop data folder, so run one
-  brand at a time. Never copy or symlink auth.json for desktop handoff.
+  brand at a time. Never copy or symlink auth.json for desktop handoff. Native continuation markers are staged only after normal desktop exit, bound to destination account/user IDs, and consumed by the native UI; never restage an uncertain marker on retry.
 - Recovery checkpoints are private app-data files, written atomically with fsync and owner-only
   permissions. Record interruption/send intent before RPC mutations. Resume only a turn interrupted
   by that operation; inspect history/acknowledgement after uncertain sends and never resend blindly.

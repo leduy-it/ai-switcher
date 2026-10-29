@@ -526,11 +526,17 @@ pub enum DesktopApp {
     Chatgpt,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSyncSettings {
+    #[serde(default = "default_true")]
+    pub resume_active_sessions: bool,
     pub enabled: bool,
     pub app: DesktopApp,
+}
+
+impl Default for DesktopSyncSettings {
+    fn default() -> Self { Self { enabled: false, app: DesktopApp::default(), resume_active_sessions: true } }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
