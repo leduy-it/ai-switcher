@@ -228,6 +228,7 @@ Acceptance: anchoring works on the active display, details expand without clippi
 Requirements:
 
 - Keep the optional always-on-top quota overlay alongside the dropdown.
+- Preserve upstream CPU/RAM/swap and busiest-app footer with an independent show-system toggle; CPU/RAM warnings can raise overlay visibility.
 - Support dragging/resizing, account selection, email and expandable detail.
 - Minimize into a small draggable logo bubble, similar to a desktop pet; one click expands it.
 - Preserve expanded geometry while minimized and clamp restored geometry to the usable screen.

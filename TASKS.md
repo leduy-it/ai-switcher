@@ -22,7 +22,7 @@ and release delivery; document remaining limitations and evidence with the corre
 | 11 | GitHub authentication, push and merge into the user's fork | 0.15.4 fix pushed to [fix/codex-auth-import](https://github.com/leduy-it/ai-switcher/tree/fix/codex-auth-import); no main merge/tag or GitHub Release published for this patch. Prior 0.15.2 release remains published |
 | 12 | List prior prompts and explain macOS refresh/install steps | Answered in the development chat |
 | 13 | Dropdown table below the menu-bar icon; expand each account; full-screen UI | Implemented |
-| 14 | Keep the floating overlay, improve its details and minimize like a pet | Implemented; draggable logo bubble and one-click expansion |
+| 14 | Keep the floating overlay, improve its details and minimize like a pet | Implemented; draggable logo bubble, one-click expansion and upstream CPU/RAM/busiest-app footer |
 | 15 | Automate a small Hello for eligible Pro/Team/Business accounts | Implemented; app-local scheduler, existing tokens, durable cooldown |
 | 16 | Export credentials by account, provider or all, raw Codex auth, email and usage | Native Codex auth.json object/array export and selectable bulk JSON import implemented in source; no wrapper/config/history. Legacy backups retained. Synthetic round-trip, scope, permissions and changed-file selection checks; installed app unchanged |
 | 17 | Apply the selected account to Codex.app and ChatGPT.app; confirm desktop identity separately | 0.15.2 resolves the owned backend and JSON daemon PID metadata; rejects unrelated CLI controllers. Reachable local handoffs supported; private/unmanaged desktop backends need a safe manual close/apply |

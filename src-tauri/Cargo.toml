@@ -3,6 +3,7 @@ name = "ai-account-switcher"
 version = "0.15.4"
 description = "Desktop account manager for AI coding tools"
 authors = ["Michael Le"]
+license = "MIT"
 edition = "2021"
 
 [lib]
@@ -38,6 +39,8 @@ tokio-stream = "0.1"
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 toml_edit = "0.22"
 uuid = { version = "1.11", features = ["v4", "serde"] }
+
+sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSRunningApplication", "libc"] }
