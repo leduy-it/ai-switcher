@@ -4,7 +4,7 @@ Read [the requirements](../requirements.md) and [the task index](../../TASKS.md)
 
 Audit [TARGET_APP_OR_REPO] for migration from Michael Le Profiles.
 
-Read the current docs/requirements.md and TASKS.md completely, or their attached copies. Preserve EVERY requirement index and baseline ID in that version (currently 1–24 and B01–B10). Apply the latest decisions: one Michael Le blue Liquid Glass identity, duyle.me reference, original author thanked in docs, support Codex CLI and the local coding backends of both installed desktop brands, keep both dropdown and floating overlay, and offer JSON paste/parse alongside Codex auth.json file import and additive provider backup restore.
+Read the current docs/requirements.md and TASKS.md completely, or their attached copies. Preserve EVERY requirement index and baseline ID in that version (currently 1–27 and B01–B10). Apply the latest decisions: one Michael Le blue Liquid Glass identity, duyle.me reference, original author thanked in docs, support Codex CLI and the local coding backends of both installed desktop brands, keep both dropdown and floating overlay, and offer JSON paste/parse alongside Codex auth.json file import and additive provider backup restore.
 
 This request is an audit. Use read-only inspection. Do not edit files/config, migrate history, copy/export credentials, switch accounts, restart apps, stop sessions, send Hello, submit continuation turns, redeem quota credits, or publish. If a runtime check requires one of those actions, mark it Not verified and state the specific validation needed.
 
@@ -45,3 +45,5 @@ Do not claim parity, conflict elimination, successful installation or task compl
 For Codex auth imports, verify Unicode clipboard whitespace repair outside quoted strings, exact credential preservation, unchanged source files and metadata-only previews. Check that live quota includes the selected workspace and that rejected credentials remain an actionable sign-in error; parsing/import must not be described as successful live authentication or token renewal.
 
 For requirement 16, verify individual Codex export is native auth.json and bulk export is an array of native auth objects without a custom wrapper or config/history. Check selectable bulk import, changed-file rejection, invalid/duplicate skip and legacy backup compatibility.
+
+For 25–27, audit fresh healthy quota selection against the verified running desktop identity, private native transport ownership/peer/cached auth, startup shell override resistance, per-destination helper stability, normal signal cleanup, target/last-turn races and observation-only retry. Distinguish explicit recent quota failure from completion or unrelated throttling. Verify compact responsive desktop/account actions and native Copy/Download JSON with append-only bulk import.

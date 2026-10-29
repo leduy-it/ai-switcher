@@ -30,3 +30,12 @@
 .localChatResults button{flex:none;white-space:nowrap}
 .localChatWarning{color:#f4c890}
 @media(max-width:440px){.localChatResults li{align-items:start;flex-direction:column}.localChatResults button{align-self:flex-start}}
+
+/* Keep account management visible; operational detail expands only when requested. */
+.desktopStatusHead{flex-wrap:wrap;margin-bottom:8px}.desktopStatusBadge{margin-left:auto;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:600;background:rgba(126,180,239,.13);color:inherit}.desktopStatusBadge.verified{color:#76d9b2;background:rgba(65,180,137,.14)}.desktopStatusBadge.warning{color:#f4c890;background:rgba(220,162,65,.12)}
+.desktopSummary{display:flex;flex-wrap:wrap;gap:5px 20px;font-size:11px;line-height:1.5;overflow-wrap:anywhere}.desktopSummary>span{min-width:0}.desktopSummary strong{font-weight:550}
+.desktopSettings{margin-top:10px;padding-top:9px;border-top:1px solid rgba(126,180,239,.16)}.desktopSettings>summary{display:flex;align-items:center;gap:6px;width:fit-content;cursor:pointer;font-size:11px;color:#78b8fb;list-style:none}.desktopSettings>summary::after{content:"＋";margin-left:4px}.desktopSettings[open]>summary{margin-bottom:14px}.desktopSettings[open]>summary::after{content:"−"}
+.desktopPending{margin-top:10px;padding:10px 12px;border:1px solid rgba(126,180,239,.18);border-radius:10px;background:rgba(70,133,210,.06);font-size:11px;line-height:1.5}.desktopPending>strong{font-size:11px;color:#78b8fb}.desktopPending p{margin:4px 0 0;overflow-wrap:anywhere;max-width:85ch}.desktopNeedsAttention{border-color:rgba(235,148,110,.28)}.desktopNeedsAttention>strong{color:#ffb4a4}
+.desktopOperationActions button{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border:1px solid rgba(126,180,239,.25);border-radius:8px;background:rgba(70,133,210,.13);color:inherit;font-size:11px;cursor:pointer}.desktopOperationActions button:disabled{opacity:.45;cursor:default}
+.desktopAutoNotice{margin:9px 0 0;font-size:11px;line-height:1.5;color:#f4c890;overflow-wrap:anywhere}.desktopSettings .desktopControls{align-items:center;gap:10px}.desktopSettings .desktopControls label{line-height:1.5}.desktopControls input{flex:none}
+@media(max-width:560px){.desktopSummary{flex-direction:column;gap:4px}.desktopStatusBadge{margin-left:0}.desktopPending{padding:9px}.desktopOperationActions>button{max-width:100%;white-space:normal;text-align:left}.desktopControls select{max-width:100%}}

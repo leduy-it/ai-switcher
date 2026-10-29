@@ -1072,7 +1072,10 @@ impl ManagedState {
         }
 
         let codex_binary = {
-            let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
             configured_binary_path(&data, &ToolId::Codex)
         };
         // Phase 2: fetch all quotas in parallel (no mutex held).
@@ -1188,7 +1191,10 @@ impl ManagedState {
 
         // Phase 2: native auth renewal and HTTP call — no state mutex held.
         let codex_binary = {
-            let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
             configured_binary_path(&data, &ToolId::Codex)
         };
         let quota = read_quota_with_native_renewal(tool_id, &config_dir, codex_binary.as_deref());
@@ -2276,74 +2282,93 @@ impl ManagedState {
         if !matches!(tool_id, ToolId::Claude | ToolId::Codex) {
             return Ok(());
         }
+        let runtimes = if *tool_id == ToolId::Codex {
+            crate::desktop::runtime()
+        } else {
+            vec![]
+        };
         let target = {
-            let data = self
+            let mut data = self
                 .data
                 .lock()
                 .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
             if *tool_id == ToolId::Codex
                 && data.desktop_sync.settings.enabled
-                && data.desktop_sync.operation.as_ref().is_some_and(|op| {
-                    !["applied", "cancelled"].contains(&op.phase.as_str())
-                        && !op.sessions.is_empty()
-                })
+                && data
+                    .desktop_sync
+                    .operation
+                    .as_ref()
+                    .is_some_and(operation_blocks_rotation)
             {
                 return Ok(());
             }
-            // Resolve the account in use from the active-profile file, NOT from `state == Active`:
-            // an account that just hit 100% is marked `Exhausted`, so matching on `Active` misses
-            // exactly the case auto-switch exists for.
             let active_id = active_account_id_for(&self.store, tool_id, &data.accounts);
-            let active = active_id.as_deref().and_then(|id| {
-                data.accounts
-                    .iter()
-                    .find(|a| a.tool_id == *tool_id && a.id == id)
-            });
-            // Hidden / weekly-locked accounts are off limits — leave them if the bare command still
-            // points there. Otherwise only switch when the account in use has hit the threshold.
-            let replacement = match active {
-                Some(active) if active.hidden || active.is_locked() => {
-                    best_replacement(&data.accounts, tool_id, threshold, Some(&active.id))
-                }
-                Some(active) if max_percent_used(active) >= threshold => {
-                    best_replacement(&data.accounts, tool_id, threshold, Some(&active.id))
-                }
-                _ => None,
+            let desktop_id = self.verified_desktop_account_id(&data, &runtimes);
+            let (target, message) = match auto_switch_decision(&data.accounts, tool_id, threshold, active_id.as_deref(), desktop_id.as_deref()) {
+                AutoSwitchDecision::Select(account) => (Some((account.id.clone(), account.is_default)), None),
+                AutoSwitchDecision::Unavailable => (None, Some("Automatic switch is waiting: no other account has recent, healthy quota. Refresh the pool or renew an unavailable account.".to_string())),
+                AutoSwitchDecision::NotNeeded => (None, None),
             };
-            replacement.map(|account| (account.id.clone(), account.is_default))
+            if *tool_id == ToolId::Codex && data.desktop_sync.auto_switch_message != message {
+                data.desktop_sync.auto_switch_message = message;
+                self.store.save(&data)?;
+            }
+            target
         };
 
         let Some((target_id, target_is_default)) = target else {
             return Ok(());
         };
 
-        if target_is_default {
-            clear_active_profile(tool_id, &self.store)
-                .context("Auto-switch failed while clearing the active profile")?;
-        } else {
-            write_active_profile(tool_id, &self.store, &target_id)
-                .context("Auto-switch failed while writing the active profile")?;
-        }
-        install_shell_hook(&self.store).context("Auto-switch failed while installing the hook")?;
-
-        let switched_name = {
-            let mut data = self
+        let selected_already = {
+            let data = self
                 .data
                 .lock()
                 .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
-            let timestamp = now();
-            normalize_account_states(&mut data.accounts, tool_id, Some(&target_id));
-            let mut name = String::new();
-            for account in data.accounts.iter_mut().filter(|a| a.tool_id == *tool_id) {
-                if account.id == target_id {
-                    account.state = AccountState::Active;
-                    account.last_used_at = Some(timestamp.clone());
-                    account.updated_at = timestamp.clone();
-                    name = account.name.clone();
-                }
+            active_account_id_for(&self.store, tool_id, &data.accounts).as_deref()
+                == Some(target_id.as_str())
+        };
+        let switched_name = if selected_already {
+            self.data
+                .lock()
+                .ok()
+                .and_then(|d| {
+                    d.accounts
+                        .iter()
+                        .find(|a| a.id == target_id)
+                        .map(|a| a.name.clone())
+                })
+                .unwrap_or_default()
+        } else {
+            if target_is_default {
+                clear_active_profile(tool_id, &self.store)
+                    .context("Auto-switch failed while clearing the active profile")?;
+            } else {
+                write_active_profile(tool_id, &self.store, &target_id)
+                    .context("Auto-switch failed while writing the active profile")?;
             }
-            self.store.save(&data)?;
-            name
+            install_shell_hook(&self.store)
+                .context("Auto-switch failed while installing the hook")?;
+
+            {
+                let mut data = self
+                    .data
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+                let timestamp = now();
+                normalize_account_states(&mut data.accounts, tool_id, Some(&target_id));
+                let mut name = String::new();
+                for account in data.accounts.iter_mut().filter(|a| a.tool_id == *tool_id) {
+                    if account.id == target_id {
+                        account.state = AccountState::Active;
+                        account.last_used_at = Some(timestamp.clone());
+                        account.updated_at = timestamp.clone();
+                        name = account.name.clone();
+                    }
+                }
+                self.store.save(&data)?;
+                name
+            }
         };
 
         let desktop_settings = self.data.lock().ok().and_then(|data| {
@@ -2351,18 +2376,22 @@ impl ManagedState {
                 .then(|| data.desktop_sync.settings.clone())
         });
         let desktop_message = if let Some(settings) = desktop_settings {
-            match self.apply_desktop_inner(settings) {
+            match crate::desktop_recovery::request_automatic(self, settings) {
                 Ok(()) => "Desktop restart and account verification queued.",
                 Err(error) => {
                     if let Ok(mut data) = self.data.lock() {
-                        data.desktop_sync.error = Some(format!("Account selected; desktop handoff could not be queued: {error:#}"));
+                        data.desktop_sync.error = Some(format!(
+                            "Account selected; desktop handoff could not be queued: {error:#}"
+                        ));
                         let _ = self.store.save(&data);
                     }
                     "Desktop handoff needs attention in Michael Le Profiles."
                 }
             }
-        } else { "Open a new terminal to apply." };
-        if let Some(app) = app {
+        } else {
+            "Open a new terminal to apply."
+        };
+        if let Some(app) = app.filter(|_| !selected_already) {
             let message = format!(
                 "{} reached its quota threshold — selected {}. {}",
                 tool_id.display_name(),
@@ -2448,14 +2477,15 @@ impl ManagedState {
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
         let default_dir = resolved_default_config_dir(&data, &ToolId::Codex);
-        let already_added = codex_identity_exists(
-            &self.store,
-            &data,
-            &default_dir,
-            account_id.as_deref(),
-            user_id.as_deref(),
-            email.as_deref(),
-        ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth);
+        let already_added =
+            codex_identity_exists(
+                &self.store,
+                &data,
+                &default_dir,
+                account_id.as_deref(),
+                user_id.as_deref(),
+                email.as_deref(),
+            ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth);
         let token_fields = ["access_token", "refresh_token", "id_token", "account_id"]
             .into_iter()
             .filter(|key| auth["tokens"][*key].as_str().is_some_and(|s| !s.is_empty()))
@@ -2503,7 +2533,8 @@ impl ManagedState {
                 account_id.as_deref(),
                 user_id.as_deref(),
                 email.as_deref(),
-            ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth) {
+            ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth)
+            {
                 anyhow::bail!("This Codex account is already added");
             }
             (default_dir, binary_path)
@@ -2553,7 +2584,8 @@ impl ManagedState {
                 account_id.as_deref(),
                 user_id.as_deref(),
                 account.account_email.as_deref(),
-            ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth) {
+            ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth)
+            {
                 Err(anyhow::anyhow!("This Codex account is already added"))
             } else {
                 data.accounts.push(account);
@@ -3388,13 +3420,11 @@ impl ManagedState {
         &self,
         settings: crate::models::DesktopSyncSettings,
     ) -> Result<AppSnapshot> {
-        let mut data = self
-            .data
+        let _guard = self
+            .account_switch
             .lock()
-            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
-        data.desktop_sync.settings = settings;
-        self.store.save(&data)?;
-        drop(data);
+            .map_err(|_| anyhow::anyhow!("Account switch lock unavailable"))?;
+        crate::desktop_recovery::update_settings(self, settings)?;
         self.snapshot()
     }
 
@@ -3469,10 +3499,17 @@ impl ManagedState {
         include_archived: bool,
     ) -> Result<crate::local_chats::SearchResult> {
         let sources = {
-            let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
             let shared = resolved_default_config_dir(&data, &ToolId::Codex);
             let mut sources = vec![("Shared Codex store".into(), shared.clone())];
-            for account in data.accounts.iter().filter(|a| a.tool_id == ToolId::Codex && a.api_provider.is_none()) {
+            for account in data
+                .accounts
+                .iter()
+                .filter(|a| a.tool_id == ToolId::Codex && a.api_provider.is_none())
+            {
                 let home = account_config_dir_with_default(&self.store, account, &shared);
                 if !sources.iter().any(|(_, existing)| existing == &home) {
                     sources.push((account.name.clone(), home));
@@ -3491,6 +3528,106 @@ impl ManagedState {
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
         self.migrate_codex_catalogs()
+    }
+
+    fn verified_desktop_account_id(
+        &self,
+        data: &StoredState,
+        runtimes: &[crate::models::DesktopRuntime],
+    ) -> Option<String> {
+        let sync = &data.desktop_sync;
+        if !sync.settings.enabled || sync.confirmed_at.is_none() {
+            return None;
+        }
+        let pid = sync.confirmed_backend_pid?;
+        let id = sync.last_applied_account_id.as_ref()?;
+        let account = data
+            .accounts
+            .iter()
+            .find(|a| a.tool_id == ToolId::Codex && &a.id == id)?;
+        let shared = resolved_default_config_dir(data, &ToolId::Codex);
+        let home = account_config_dir_with_default(&self.store, account, &shared);
+        runtimes
+            .iter()
+            .any(|r| {
+                r.running
+                    && r.app == sync.settings.app
+                    && r.backend_pid == Some(pid)
+                    && r.profile_home.as_deref() == Some(home.as_path())
+                    && r.session_home.as_deref() == Some(shared.as_path())
+            })
+            .then(|| id.clone())
+    }
+
+    pub(crate) fn ensure_desktop_target(
+        &self,
+        expected_id: &str,
+        expected_home: &std::path::Path,
+        expected_shared: &std::path::Path,
+    ) -> Result<()> {
+        let (account, profile, shared) = self.desktop_selected_target()?;
+        anyhow::ensure!(
+            account.id == expected_id && profile == expected_home && shared == expected_shared,
+            "Account selection changed during desktop preflight; nothing further was interrupted"
+        );
+        Ok(())
+    }
+
+    pub(crate) fn preflight_desktop_target(
+        &self,
+        automatic: bool,
+        expected_id: &str,
+        expected_home: &std::path::Path,
+        expected_shared: &std::path::Path,
+    ) -> Result<()> {
+        self.ensure_desktop_target(expected_id, expected_home, expected_shared)?;
+        let (account, profile, _) = self.desktop_selected_target()?;
+        let (binary, threshold) = {
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            (
+                configured_binary_path(&data, &ToolId::Codex),
+                auto_switch_setting(&data, &ToolId::Codex).threshold,
+            )
+        };
+        let quota = read_quota_with_native_renewal(&ToolId::Codex, &profile, binary.as_deref());
+        self.ensure_desktop_target(expected_id, expected_home, expected_shared)?;
+        let error = quota.error.clone();
+        let mut checked = account.clone();
+        checked.quota = Some(quota.clone());
+        {
+            let mut data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            if let Some(current) = data
+                .accounts
+                .iter_mut()
+                .find(|a| a.id == account.id && a.tool_id == ToolId::Codex)
+            {
+                current.quota = Some(quota);
+            }
+            self.store.save(&data)?;
+        }
+        let auth_rejected = error.as_deref().is_some_and(|message| {
+            message.contains("401")
+                || message.contains("403")
+                || message.contains("refresh token")
+                || message.contains("verifiably fresh")
+                || message.contains("workspace or user identity")
+        });
+        anyhow::ensure!(
+            !auth_rejected && (!automatic || error.is_none()),
+            "The destination account could not authenticate/read quota: {}",
+            error.unwrap_or_default()
+        );
+        anyhow::ensure!(
+            !automatic || max_percent_used(&checked) < threshold,
+            "The destination account no longer has enough quota; no desktop work was interrupted"
+        );
+        Ok(())
     }
 
     pub(crate) fn desktop_selected_target(
@@ -3519,7 +3656,7 @@ impl ManagedState {
         &self,
         settings: crate::models::DesktopSyncSettings,
         expected_id: &str,
-        resume_threads: Option<&[String]>,
+        resume_threads: Option<&[(String, String)]>,
     ) -> Result<()> {
         let (account, profile, shared) = self.desktop_selected_target()?;
         anyhow::ensure!(
@@ -3544,16 +3681,15 @@ impl ManagedState {
                 link_shared_sessions_to(&ToolId::Codex, &profile, &shared);
                 link_shared_config_to(&ToolId::Codex, &profile, &shared);
                 crate::desktop::validate_catalog_config(&profile, &shared)?;
-                let migration = self.migrate_codex_catalogs()?;
-                anyhow::ensure!(migration.conflicts == 0, "{} sessions have partially different paginated histories. Private backups and original profiles were preserved; reconcile those histories before switching", migration.conflicts);
+                // Active recovery already requires durable history in the shared catalog.
+                // Legacy catalog repair is explicit; unrelated CLI profiles must not block handoff.
                 let already_running = crate::desktop::runtime().iter().any(|r| {
                     r.app == settings.app
                         && r.running
                         && r.profile_home.as_deref() == Some(profile.as_path())
                         && r.session_home.as_deref() == Some(shared.as_path())
                 });
-                let needs_refresh = migration.catalog_threads > 0
-                    || crate::desktop_state::needs_refresh(&profile, &shared)?;
+                let needs_refresh = crate::desktop_state::needs_refresh(&profile, &shared)?;
                 if crate::desktop::can_reuse_running_desktop(
                     already_running,
                     needs_refresh,
@@ -3565,8 +3701,12 @@ impl ManagedState {
                     Ok(())
                 } else {
                     let state_profiles = {
-                        let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
-                        data.accounts.iter()
+                        let data = self
+                            .data
+                            .lock()
+                            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+                        data.accounts
+                            .iter()
                             .filter(|a| a.tool_id == ToolId::Codex && a.api_provider.is_none())
                             .map(|a| account_config_dir_with_default(&self.store, a, &shared))
                             .filter(|p| p.is_dir())
@@ -3608,34 +3748,52 @@ impl ManagedState {
         profile: &std::path::Path,
         account_id: &str,
     ) -> Result<()> {
-        let runtime = crate::desktop::runtime();
-        anyhow::ensure!(
-            runtime
+        let (shared, target_app) = {
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            let shared = resolved_default_config_dir(&data, &ToolId::Codex);
+            let account = data
+                .accounts
                 .iter()
-                .any(|r| r.running && r.profile_home.as_deref() == Some(profile)),
-            "Desktop execution profile has not been confirmed"
-        );
-        let (_, selected, shared) = self.desktop_selected_target()?;
-        anyhow::ensure!(
-            selected == profile,
-            "CLI selection changed before desktop confirmation"
-        );
+                .find(|a| a.tool_id == ToolId::Codex && a.id == account_id)
+                .context("Desktop account no longer exists")?;
+            anyhow::ensure!(
+                account_config_dir_with_default(&self.store, account, &shared) == profile,
+                "Desktop profile differs from the account being confirmed"
+            );
+            (shared, data.desktop_sync.settings.app.clone())
+        };
         crate::desktop::validate_catalog_config(profile, &shared)?;
         let expected = crate::quota::codex_account_email(profile)
             .context("Profile has no email to verify desktop identity")?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        let mut client = loop {
-            let connection = crate::desktop::runtime().iter()
-                .find(|r| r.running && r.profile_home.as_deref() == Some(profile))
+        let (mut client, confirmed_pid) = loop {
+            let runtime = crate::desktop::runtime().into_iter().find(|r| {
+                r.running
+                    && r.app == target_app
+                    && r.profile_home.as_deref() == Some(profile)
+                    && r.session_home.as_deref() == Some(shared.as_path())
+            });
+            let connection = runtime
+                .as_ref()
                 .context("Selected desktop is no longer running")
                 .and_then(crate::desktop_rpc::Client::connect_desktop);
             match connection {
-                Ok(client) => break client,
+                Ok(client) => {
+                    break (
+                        client,
+                        runtime
+                            .and_then(|r| r.backend_pid)
+                            .context("Desktop process is unknown")?,
+                    )
+                }
                 Err(error) if std::time::Instant::now() >= deadline => return Err(error),
                 Err(_) => std::thread::sleep(std::time::Duration::from_millis(400)),
             }
         };
-        let response = client.request("account/read", serde_json::json!({"refreshToken":false}))?;
+        let response = client.current_credential(profile)?;
         anyhow::ensure!(crate::desktop::backend_catalog_home(profile).as_deref() == Some(shared.as_path()), "The running desktop backend's shared catalog has not been confirmed; apply again after its work finishes");
         let actual = response["account"]["email"]
             .as_str()
@@ -3644,22 +3802,26 @@ impl ManagedState {
             actual.eq_ignore_ascii_case(&expected),
             "Desktop backend identity differs from the selected profile; handoff is not confirmed"
         );
-        if let Some(actual_id) = response["workspaceRouting"]["chatgptAccountId"].as_str() {
-            let expected_id = crate::quota::codex_account_id(profile)
-                .context("Selected profile has no workspace identity")?;
-            anyhow::ensure!(
-                actual_id == expected_id,
-                "Desktop workspace differs from the selected profile; handoff is not confirmed"
-            );
-        }
+        anyhow::ensure!(
+            crate::desktop::runtime().iter().any(|r| r.running
+                && r.app == target_app
+                && r.backend_pid == Some(confirmed_pid)
+                && r.profile_home.as_deref() == Some(profile)),
+            "Desktop restarted during identity verification; confirm again"
+        );
         let mut data = self
             .data
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        anyhow::ensure!(
+            data.desktop_sync.settings.app == target_app,
+            "Desktop target changed during verification"
+        );
         data.desktop_sync.confirmed_email = Some(actual.to_string());
         data.desktop_sync.confirmed_plan =
             response["account"]["planType"].as_str().map(str::to_string);
         data.desktop_sync.confirmed_at = Some(now());
+        data.desktop_sync.confirmed_backend_pid = Some(confirmed_pid);
         data.desktop_sync.last_applied_account_id = Some(account_id.to_string());
         self.store.save(&data)?;
         Ok(())
@@ -3680,7 +3842,7 @@ impl ManagedState {
             let shared = resolved_default_config_dir(&data, &ToolId::Codex);
             data.accounts
                 .iter()
-                .filter(|a| a.tool_id == ToolId::Codex && !a.hidden && a.api_provider.is_none())
+                .filter(|a| a.tool_id == ToolId::Codex && a.api_provider.is_none())
                 .map(|a| {
                     (
                         a.id.clone(),
@@ -3711,6 +3873,47 @@ impl ManagedState {
         let runtime_changed = seen
             .insert("desktop-runtime".into(), runtime_key.clone())
             .is_some_and(|old| old != runtime_key);
+        let runtimes = crate::desktop::runtime();
+        let fast_source = self.data.lock().ok().and_then(|data| {
+            (data.desktop_sync.settings.enabled
+                && auto_switch_setting(&data, &ToolId::Codex).enabled
+                && runtimes.iter().any(|r| r.running))
+            .then(|| {
+                self.verified_desktop_account_id(&data, &runtimes)
+                    .or_else(|| active_account_id_for(&self.store, &ToolId::Codex, &data.accounts))
+            })
+            .flatten()
+        });
+        let mut fast_polled = false;
+        if let Some(id) = fast_source {
+            let now = chrono::Utc::now().timestamp();
+            if desktop_poll_due(seen.get("desktop-quota-fast-poll").map(String::as_str), now) {
+                seen.insert("desktop-quota-fast-poll".into(), now.to_string());
+                let _ = self.refresh_single_account(&ToolId::Codex, &id, None);
+                fast_polled = true;
+                let stale_pool = self.data.lock().ok().is_some_and(|data| {
+                    data.accounts
+                        .iter()
+                        .find(|a| a.tool_id == ToolId::Codex && a.id == id)
+                        .is_some_and(|a| {
+                            max_percent_used(a)
+                                >= auto_switch_setting(&data, &ToolId::Codex).threshold
+                        })
+                        && data.accounts.iter().any(|a| {
+                            a.tool_id == ToolId::Codex
+                                && a.id != id
+                                && !a.hidden
+                                && a.api_provider.is_none()
+                                && a.quota
+                                    .as_ref()
+                                    .is_some_and(|q| q.error.is_none() && !codex_quota_is_recent(q))
+                        })
+                });
+                if stale_pool {
+                    let _ = self.refresh_tool(ToolId::Codex, None);
+                }
+            }
+        }
         for id in &changed {
             let _ = self.refresh_single_account(&ToolId::Codex, id, None);
         }
@@ -3730,10 +3933,12 @@ impl ManagedState {
                     .any(|r| r.running && r.profile_home.as_deref() == Some(home.as_path()))
         });
         for (id, home) in &targets {
-            if changed.contains(id)
-                && crate::desktop::runtime()
-                    .iter()
-                    .any(|r| r.running && r.profile_home.as_deref() == Some(home.as_path()))
+            if (changed.contains(id) || initial_watch || runtime_changed)
+                && crate::desktop::runtime().iter().any(|r| {
+                    r.running
+                        && (r.uses_managed_proxy || r.uses_local_daemon || r.uses_daemon_proxy)
+                        && r.profile_home.as_deref() == Some(home.as_path())
+                })
             {
                 if let Err(error) = self.verify_desktop_identity(home, id) {
                     if selected_target
@@ -3744,6 +3949,7 @@ impl ManagedState {
                     }
                     if let Ok(mut data) = self.data.lock() {
                         data.desktop_sync.confirmed_at = None;
+                        data.desktop_sync.confirmed_backend_pid = None;
                         data.desktop_sync.confirmed_email = None;
                         data.desktop_sync.error = Some(format!(
                             "Desktop credential change could not be confirmed: {error:#}"
@@ -3756,11 +3962,10 @@ impl ManagedState {
         if initial_watch || selected_changed || desktop_mismatch {
             if let Ok(_guard) = self.account_switch.lock() {
                 let settings = self.data.lock().ok().and_then(|data| {
-                    let pending =
-                        data.desktop_sync.operation.as_ref().is_some_and(|op| {
-                            !["applied", "cancelled"].contains(&op.phase.as_str())
-                                && (op.phase != "needsAttention" || !op.sessions.is_empty())
-                        });
+                    let pending = data.desktop_sync.operation.as_ref().is_some_and(|op| {
+                        !["applied", "cancelled"].contains(&op.phase.as_str())
+                            && (op.phase != "needsAttention" || !op.sessions.is_empty())
+                    });
                     (data.desktop_sync.settings.enabled && !pending)
                         .then(|| data.desktop_sync.settings.clone())
                 });
@@ -3775,7 +3980,7 @@ impl ManagedState {
                 }
             }
         }
-        if !changed.is_empty() || runtime_changed || selected_changed {
+        if !changed.is_empty() || runtime_changed || selected_changed || fast_polled {
             if let Ok(snapshot) = self.snapshot() {
                 let _ = app.emit("snapshot-changed", snapshot);
             }
@@ -4548,13 +4753,17 @@ fn read_quota_with_native_renewal(
 ) -> QuotaInfo {
     let renewal = if *tool == ToolId::Codex {
         binary.map(|binary| crate::codex_auth::ensure_fresh(binary, profile))
-    } else { None };
+    } else {
+        None
+    };
     let mut quota = read_quota(tool, profile);
     if let Some(Err(error)) = renewal {
         if crate::codex_auth::renewal_requires_attention(&error) {
             quota.error = Some(error.to_string());
         } else if let Some(message) = &mut quota.error {
-            if message.contains("401") || message.contains("403") { *message = format!("{message} Native renewal: {error}"); }
+            if message.contains("401") || message.contains("403") {
+                *message = format!("{message} Native renewal: {error}");
+            }
         }
     }
     quota
@@ -4571,6 +4780,64 @@ fn max_percent_used(account: &Account) -> f64 {
             .flatten()
             .fold(0.0_f64, f64::max)
     })
+}
+
+pub(crate) fn operation_blocks_rotation(op: &crate::models::DesktopOperationView) -> bool {
+    if ["applied", "cancelled"].contains(&op.phase.as_str()) {
+        return false;
+    }
+    ["checkpointing", "switching", "restoring", "retrySwitch"].contains(&op.phase.as_str())
+        || op
+            .sessions
+            .iter()
+            .any(|s| ["checkpointing", "interrupted", "restoring"].contains(&s.phase.as_str()))
+}
+
+enum AutoSwitchDecision<'a> {
+    NotNeeded,
+    Unavailable,
+    Select(&'a Account),
+}
+
+fn auto_switch_decision<'a>(
+    accounts: &'a [Account],
+    tool: &ToolId,
+    threshold: f64,
+    cli: Option<&str>,
+    desktop: Option<&str>,
+) -> AutoSwitchDecision<'a> {
+    let source = (if *tool == ToolId::Codex {
+        desktop.or(cli)
+    } else {
+        cli
+    })
+    .and_then(|id| accounts.iter().find(|a| a.tool_id == *tool && a.id == id));
+    let Some(source) = source else {
+        return AutoSwitchDecision::NotNeeded;
+    };
+    if !source.hidden && !source.is_locked() && max_percent_used(source) < threshold {
+        return AutoSwitchDecision::NotNeeded;
+    }
+    best_replacement(accounts, tool, threshold, Some(&source.id))
+        .map(AutoSwitchDecision::Select)
+        .unwrap_or(AutoSwitchDecision::Unavailable)
+}
+
+fn desktop_poll_due(previous: Option<&str>, now: i64) -> bool {
+    previous
+        .and_then(|value| value.parse::<i64>().ok())
+        .is_none_or(|at| now.saturating_sub(at) >= 30 || now.saturating_sub(at) < -60)
+}
+
+fn codex_quota_is_recent(quota: &QuotaInfo) -> bool {
+    quota
+        .updated_at
+        .as_deref()
+        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        .is_some_and(|at| {
+            let age = chrono::Utc::now().signed_duration_since(at).num_seconds();
+            (-60..=360).contains(&age)
+        })
 }
 
 /// The best replacement account: same tool, not `excluded`, not yet at the threshold,
@@ -4592,7 +4859,7 @@ fn best_replacement<'a>(
                 && !matches!(account.state, AccountState::NeedsLogin)
                 && max_percent_used(account) < threshold
                 // Skip accounts with no quota data yet (unsure whether any is left).
-                && account.quota.as_ref().is_some_and(|q| q.error.is_none() && (q.five_hour.percent_used.is_some() || q.weekly.percent_used.is_some()))
+                && account.quota.as_ref().is_some_and(|q| q.error.is_none() && (q.five_hour.percent_used.is_some() || q.weekly.percent_used.is_some()) && (*tool_id != ToolId::Codex || codex_quota_is_recent(q)))
         })
         .min_by(|left, right| max_percent_used(left).total_cmp(&max_percent_used(right)))
 }
@@ -5031,6 +5298,75 @@ mod tests {
         serde_json::from_value(serde_json::json!({"id":id,"toolId":tool,"name":id,"state":"idle","fingerprint":if default {format!("system-default:{tool}")} else {format!("profile:{id}")},"createdAt":"now","updatedAt":"now","isDefault":default})).unwrap()
     }
 
+    fn codex_with_quota(id: &str, percent: f64) -> Account {
+        let mut account = test_account(id, false, percent);
+        account.tool_id = ToolId::Codex;
+        account.quota.as_mut().unwrap().updated_at = Some(now());
+        account
+    }
+
+    #[test]
+    fn desktop_quota_poll_is_bounded_and_recovers_after_clock_changes() {
+        assert!(desktop_poll_due(None, 100));
+        assert!(!desktop_poll_due(Some("100"), 129));
+        assert!(desktop_poll_due(Some("100"), 130));
+        assert!(desktop_poll_due(Some("1000"), 100));
+    }
+
+    #[test]
+    fn auto_switch_uses_the_verified_desktop_even_if_cli_already_selected_healthy() {
+        let accounts = vec![
+            codex_with_quota("desktop", 100.0),
+            codex_with_quota("cli", 10.0),
+        ];
+        assert!(
+            matches!(auto_switch_decision(&accounts, &ToolId::Codex, 95.0, Some("cli"), Some("desktop")), AutoSwitchDecision::Select(a) if a.id == "cli")
+        );
+        assert!(matches!(
+            auto_switch_decision(&accounts, &ToolId::Codex, 95.0, Some("cli"), None),
+            AutoSwitchDecision::NotNeeded
+        ));
+    }
+
+    #[test]
+    fn automatic_fallback_never_selects_stale_failed_or_exhausted_quota() {
+        let mut stale = codex_with_quota("stale", 0.0);
+        stale.quota.as_mut().unwrap().updated_at =
+            Some((chrono::Utc::now() - chrono::Duration::minutes(7)).to_rfc3339());
+        let mut failed = codex_with_quota("failed", 0.0);
+        failed.quota.as_mut().unwrap().error = Some("HTTP 401".into());
+        let accounts = vec![
+            codex_with_quota("current", 100.0),
+            stale,
+            failed,
+            codex_with_quota("spent", 100.0),
+        ];
+        assert!(matches!(
+            auto_switch_decision(&accounts, &ToolId::Codex, 95.0, Some("current"), None),
+            AutoSwitchDecision::Unavailable
+        ));
+    }
+
+    #[test]
+    fn waiting_snapshot_does_not_lock_rotation_but_uncertain_interruption_does() {
+        let mut op = crate::models::DesktopOperationView {
+            phase: "waiting".into(),
+            sessions: vec![crate::models::DesktopSessionView {
+                phase: "waiting".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert!(!operation_blocks_rotation(&op));
+        op.phase = "restoring".into();
+        assert!(operation_blocks_rotation(&op));
+        op.phase = "needsAttention".into();
+        op.sessions[0].phase = "checkpointing".into();
+        assert!(operation_blocks_rotation(&op));
+        op.sessions[0].phase = "continued".into();
+        assert!(!operation_blocks_rotation(&op));
+    }
+
     #[test]
     fn appending_imported_accounts_preserves_existing_pool_and_selection() {
         let root = std::env::temp_dir().join(format!("append-pool-{}", Uuid::new_v4()));
@@ -5134,10 +5470,16 @@ mod tests {
             account_switch: Mutex::new(()),
             priming: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
-        let preview_single = state.parse_codex_auth(crate::models::CodexAuthSourceInput {
-            auth_file_path: None, auth_json: Some(auth.to_string()),
-        }).unwrap();
-        assert!(preview_single.already_added, "token-only duplicate must be rejected in single import too");
+        let preview_single = state
+            .parse_codex_auth(crate::models::CodexAuthSourceInput {
+                auth_file_path: None,
+                auth_json: Some(auth.to_string()),
+            })
+            .unwrap();
+        assert!(
+            preview_single.already_added,
+            "token-only duplicate must be rejected in single import too"
+        );
         let input = root.join("list.json");
         std::fs::write(
             &input,
@@ -5196,23 +5538,33 @@ mod tests {
     fn active_hidden_profile_remains_identifiable_for_auto_replacement() {
         let root = std::env::temp_dir().join(format!("active-hidden-{}", Uuid::new_v4()));
         let store = Store::for_test(root.clone()).unwrap();
-        let mut account = synthetic_account("hidden","codex",false);
-        account.hidden=true;
+        let mut account = synthetic_account("hidden", "codex", false);
+        account.hidden = true;
         std::fs::create_dir_all(store.account_dir(&ToolId::Codex, &account.id)).unwrap();
-        write_active_profile(&ToolId::Codex,&store,&account.id).unwrap();
-        assert_eq!(active_account_id_for(&store,&ToolId::Codex,&[account]).as_deref(),Some("hidden"));
+        write_active_profile(&ToolId::Codex, &store, &account.id).unwrap();
+        assert_eq!(
+            active_account_id_for(&store, &ToolId::Codex, &[account]).as_deref(),
+            Some("hidden")
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn replacement_requires_measured_subscription_quota() {
-        let mut unknown = synthetic_account("unknown","codex",false);
-        let mut quota = QuotaInfo::with_message("synthetic"); quota.error=None;
-        unknown.quota=Some(quota.clone());
-        assert!(best_replacement(&[unknown.clone()],&ToolId::Codex,95.0,None).is_none());
-        let mut healthy = synthetic_account("healthy","codex",false);
-        quota.five_hour.percent_used=Some(20.0); healthy.quota=Some(quota);
-        assert_eq!(best_replacement(&[unknown,healthy],&ToolId::Codex,95.0,None).map(|a| a.id.as_str()),Some("healthy"));
+        let mut unknown = synthetic_account("unknown", "codex", false);
+        let mut quota = QuotaInfo::with_message("synthetic");
+        quota.error = None;
+        unknown.quota = Some(quota.clone());
+        assert!(best_replacement(&[unknown.clone()], &ToolId::Codex, 95.0, None).is_none());
+        let mut healthy = synthetic_account("healthy", "codex", false);
+        quota.five_hour.percent_used = Some(20.0);
+        quota.updated_at = Some(now());
+        healthy.quota = Some(quota);
+        assert_eq!(
+            best_replacement(&[unknown, healthy], &ToolId::Codex, 95.0, None)
+                .map(|a| a.id.as_str()),
+            Some("healthy")
+        );
     }
 
     #[test]
@@ -5224,12 +5576,31 @@ mod tests {
         })).unwrap();
         let dir = store.account_dir(&ToolId::Codex, &account.id);
         std::fs::create_dir_all(&dir).unwrap();
-        let raw = r#"{"tokens":{"access_token":"synthetic-access","refresh_token":"synthetic-refresh"}}"#;
+        let raw =
+            r#"{"tokens":{"access_token":"synthetic-access","refresh_token":"synthetic-refresh"}}"#;
         std::fs::write(dir.join("auth.json"), raw).unwrap();
-        let data = StoredState { accounts: vec![account], ..StoredState::default() };
-        assert!(codex_refresh_token_exists(&store, &data, &root.join("default"), raw));
-        assert!(!codex_refresh_token_exists(&store, &data, &root.join("default"), &raw.replace("synthetic-refresh", "other-refresh")));
-        assert!(!codex_refresh_token_exists(&store, &data, &root.join("default"), "{}"));
+        let data = StoredState {
+            accounts: vec![account],
+            ..StoredState::default()
+        };
+        assert!(codex_refresh_token_exists(
+            &store,
+            &data,
+            &root.join("default"),
+            raw
+        ));
+        assert!(!codex_refresh_token_exists(
+            &store,
+            &data,
+            &root.join("default"),
+            &raw.replace("synthetic-refresh", "other-refresh")
+        ));
+        assert!(!codex_refresh_token_exists(
+            &store,
+            &data,
+            &root.join("default"),
+            "{}"
+        ));
         std::fs::remove_dir_all(root).unwrap();
     }
 

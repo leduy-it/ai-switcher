@@ -5,6 +5,7 @@ mod codex_import;
 mod credential_export;
 mod credential_import;
 mod desktop;
+mod desktop_proxy;
 mod desktop_recovery;
 mod desktop_rpc;
 mod desktop_state;
@@ -1004,5 +1005,16 @@ fn display_error(error: anyhow::Error) -> String {
         "No login found for this tool".to_string()
     } else {
         text
+    }
+}
+
+#[cfg(unix)]
+pub fn desktop_runtime_proxy() -> i32 {
+    match desktop_proxy::run() {
+        Ok(()) => 0,
+        Err(_) => {
+            eprintln!("Michael Le Profiles: native desktop transport failed; inspect the managed desktop status.");
+            1
+        }
     }
 }

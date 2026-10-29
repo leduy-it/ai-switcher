@@ -536,7 +536,13 @@ pub struct DesktopSyncSettings {
 }
 
 impl Default for DesktopSyncSettings {
-    fn default() -> Self { Self { enabled: false, app: DesktopApp::default(), resume_active_sessions: true } }
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            app: DesktopApp::default(),
+            resume_active_sessions: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -549,6 +555,10 @@ pub struct DesktopSyncState {
     pub confirmed_email: Option<String>,
     pub confirmed_plan: Option<String>,
     pub confirmed_at: Option<String>,
+    #[serde(default)]
+    pub confirmed_backend_pid: Option<i32>,
+    #[serde(default)]
+    pub auto_switch_message: Option<String>,
     pub operation: Option<DesktopOperationView>,
 }
 
@@ -561,9 +571,11 @@ pub struct DesktopOperationView {
     pub target_account_id: String,
     pub sessions: Vec<DesktopSessionView>,
     pub updated_at: String,
+    #[serde(default)]
+    pub block_reason: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopSessionView {
     pub thread_id: String,
@@ -582,6 +594,12 @@ pub struct DesktopRuntime {
     pub pid: Option<i32>,
     pub backend_pid: Option<i32>,
     pub uses_daemon_proxy: bool,
+    #[serde(default)]
+    pub uses_local_daemon: bool,
+    #[serde(default)]
+    pub uses_managed_proxy: bool,
+    #[serde(skip)]
+    pub control_socket: Option<std::path::PathBuf>,
     pub profile_home: Option<std::path::PathBuf>,
     pub session_home: Option<std::path::PathBuf>,
 }

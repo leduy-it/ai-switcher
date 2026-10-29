@@ -431,6 +431,13 @@ pub fn validate_native_resume(
     native_resume_state(profile, account_id, user_id, threads).map(|_| ())
 }
 
+pub fn native_resume_consumed(profile: &Path) -> Result<bool> {
+    let state = read(&profile.join(STATE))?;
+    Ok(state
+        .pointer("/electron-persisted-atom-state/update-resume-state-v1")
+        .is_some_and(Value::is_null))
+}
+
 pub fn stage_native_resume(
     profile: &Path,
     shared: &Path,

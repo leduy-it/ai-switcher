@@ -700,12 +700,12 @@ export function App() {
                 <div className="titleRow">
                   <h2>{currentTool.name}</h2>
                   <span className={`status ${currentTool.installed ? "ok" : "muted"}`}>
-                    {currentTool.installed ? "Ready" : "Tool not installed"}
+                    {currentTool.installed ? "Installed" : "Tool not installed"}
                   </span>
                   {currentTool.id !== "antigravity" && currentAutoSwitch.enabled && (
                     <span
                       className="autoChip"
-                      title={`Select another ${currentTool.id} account at ${currentAutoSwitch.threshold}% quota; enabled desktop sync also queues a verified restart`}
+                      title={`Switch account at ${currentAutoSwitch.threshold}% quota; desktop reload follows desktop settings`}
                     >
                       <Zap />
                       Auto {currentAutoSwitch.threshold}%
@@ -2737,8 +2737,8 @@ function AccountCard({
       ) : (
         <Quota
           quota={account.quota}
-          // Offer a manual token renew only for Claude subscription accounts (Codex/API have no
-          // app-refreshable OAuth token). The button itself only appears on an auth-type error.
+          // Claude has a dedicated manual renewal action. Codex renews through its native
+          // owner during Refresh quota; credential values stay out of the webview.
           canRefreshToken={tool.id === "claude" && !isApi}
           onRefreshToken={onRefreshToken}
           refreshingToken={refreshingToken}
@@ -2872,7 +2872,7 @@ function AutoSwitchBar({
         <div className="autoSwitchText">
           <strong>{tool.name}</strong>
           <small>
-            Switch the bare <code>{tool.id}</code> command to another account when quota is nearly out.
+            {tool.id === "codex" ? "Switch accounts when quota is nearly out; desktop restart and continuation follow your desktop settings." : <>Switch the bare <code>{tool.id}</code> command to another account when quota is nearly out.</>}
           </small>
         </div>
         <button

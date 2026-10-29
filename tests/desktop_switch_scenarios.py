@@ -192,7 +192,10 @@ def main():
     backend = None
     try:
         backend = Backend(binary, homes["a"], shared, scratch, root / "backend-a.log")
-        assert backend.request("account/read", {"refreshToken": False})["account"]["email"] == "fixture-a@example.invalid"
+        identity = backend.request("account/read", {"refreshToken": False})
+        assert identity["account"]["email"] == "fixture-a@example.invalid"
+        assert identity["workspaceRouting"]["chatgptAccountId"] == "00000000-0000-4000-8000-00000000000a"
+        assert backend.request("getAuthStatus", {"includeToken": True, "refreshToken": False})["authToken"] == jwt("a")
         thread = backend.request("thread/start", {"cwd": str(scratch), "model": "fixture-model", "modelProvider": "fixture",
                                                   "approvalPolicy": "never", "sandbox": "danger-full-access"})["thread"]
         thread_id = thread["id"]
@@ -204,7 +207,10 @@ def main():
         Provider.release.set()
         backend.close(); backend = None
         backend = Backend(binary, homes["b"], shared, scratch, root / "backend-b.log")
-        assert backend.request("account/read", {"refreshToken": False})["account"]["email"] == "fixture-b@example.invalid"
+        identity = backend.request("account/read", {"refreshToken": False})
+        assert identity["account"]["email"] == "fixture-b@example.invalid"
+        assert identity["workspaceRouting"]["chatgptAccountId"] == "00000000-0000-4000-8000-00000000000b"
+        assert backend.request("getAuthStatus", {"includeToken": True, "refreshToken": False})["authToken"] == jwt("b")
         resumed = backend.request("thread/resume", {"threadId": thread_id, "excludeTurns": True})
         assert resumed["thread"]["id"] == thread_id
         continued = backend.request("turn/start", {"threadId": thread_id,
@@ -222,7 +228,7 @@ def main():
             assert hashlib.sha256((home / "auth.json").read_bytes()).hexdigest() == before[key], "Fixture auth was unexpectedly refreshed"
         report = {"result": "passed", "testRoot": str(root), "threadId": thread_id,
               "scenarios": ["synthetic OAuth identity A", "interrupt active fixture turn", "restart isolated backend with identity B",
-                            "resume original thread", "continued inference uses credential B", "recovery retry reads persisted acknowledgement", "credential files unchanged"]}
+                            "resume original thread", "continued inference uses credential B", "recovery retry reads persisted acknowledgement", "credential files unchanged", "native credential cache and workspace match selected auth"]}
         (root / "report.json").write_text(json.dumps(report, indent=2) + "\n")
         print(json.dumps(report, indent=2))
     finally:

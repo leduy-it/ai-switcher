@@ -129,11 +129,10 @@ pub fn ensure_fresh(binary: &Path, profile: &Path) -> Result<bool> {
             .find(|runtime| runtime.running && runtime.profile_home.as_deref() == Some(profile));
         if let Some(runtime) = owned {
             let mut client = crate::desktop_rpc::Client::connect_desktop(&runtime).map_err(|_| anyhow::anyhow!("This profile is owned by a private desktop backend; use that desktop to renew, or close it before refreshing"))?;
-            client
-                .request("account/read", json!({"refreshToken":true}))
-                .map_err(|_| {
-                    anyhow::anyhow!("The owning Codex desktop could not renew this credential")
-                })?;
+            client.request("account/read", json!({"refreshToken":true}))?;
+        } else if crate::desktop::idle_managed_daemon_owner(profile).is_some() {
+            let mut client = crate::desktop_rpc::Client::connect(profile)?;
+            client.request("account/read", json!({"refreshToken":true}))?;
         } else {
             anyhow::ensure!(!crate::desktop::profile_is_in_use(profile), "This profile is in use by Codex CLI or a private desktop; let that client renew or close it before refreshing");
             refresh_idle_profile(binary, profile)?;
@@ -282,6 +281,11 @@ fn classify_native_stderr(line: &str) -> Option<NativeRenewalFailure> {
     } else {
         None
     }
+}
+
+/// Whitelist provider categories; never propagate raw RPC errors/token-bearing text.
+pub(crate) fn sanitized_native_failure(value: &str) -> Option<anyhow::Error> {
+    classify_native_stderr(value).map(Into::into)
 }
 
 pub fn renewal_requires_attention(error: &anyhow::Error) -> bool {

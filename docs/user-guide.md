@@ -64,7 +64,7 @@ store. The main `.codex` catalog and project/sidebar state are shared for local 
   its execution profile plus the running local backend's `account/read` email/workspace identity.
   An `auth.json` file alone does not prove desktop or cloud sign-in. Cloud conversations remain
   subject to the selected account's access; Switcher never tries to resume inaccessible cloud work.
-- The default handoff waits for active turns to finish. It requests normal application quit and
+- With Restart & continue disabled, handoff waits for active turns to finish. It requests normal application quit and
   starts the chosen desktop with explicit profile/catalog paths so shell initialization cannot
   replace the chosen profile. A destination backend with an old catalog is repaired only when idle.
   Desktop instances launched outside Switcher with an unknown execution profile wait until the
@@ -74,9 +74,7 @@ store. The main `.codex` catalog and project/sidebar state are shared for local 
   old/new profile, model/execution policy, terminal metadata and last recorded session results.
   Checkpoints live in the app data directory's `desktop-recovery/` with directory mode `0700` and
   file mode `0600`. They contain private session history and should not be published.
-- After verifying the new identity, recovery uses `thread/resume` and `turn/start` in the original
-  thread. The continuation asks the agent to inspect files/processes, find the last finished step,
-  and complete the remaining work without repeating successful or uncertain external actions.
+- On supported managed desktops, the native updater contract owns the empty continuation turn and reattaches native client tools in the original chat. Generic backend recovery uses `thread/resume` and `turn/start` only for eligible non-native runtimes. Recovery preserves the objective and existing results; external effects still require inspection rather than blind repetition.
   Persisted send intent, message IDs, turn acknowledgement and history markers prevent blind resend
   after a connection loss. Completed, user-resumed/stopped, approval-blocked, ephemeral, remote or
   unsupported client-tool sessions are left for the original client. RAM/PTY state is not restored.
@@ -107,7 +105,7 @@ store. The main `.codex` catalog and project/sidebar state are shared for local 
   active desktop work and reapply the desktop account to refresh the chat list. Handoffs merge the
   outgoing state after normal quit, prepare a private regular snapshot for the incoming profile,
   and refresh its local catalog scan; desktop atomic saves no longer break a shared-state symlink.
-  The handoff also runs this repair before reopening a desktop. SQLite creates consistent snapshots
+  Legacy catalog repair is explicit; active handoff preserves already-shared history and prepares incoming desktop placement state after normal exit. SQLite creates consistent snapshots
   including committed WAL data; backups live under the main home's `backups/session-catalog-migration-*`
   with private permissions. Existing records/cursors are never replaced. Partial history conflicts,
   unavailable rollout files, active source profiles and unknown schemas are reported. Creator/source,
@@ -244,7 +242,9 @@ Enable Codex auto-switch at your preferred threshold and **Apply desktop when se
 
 The native path follows the installed app’s update recovery contract: after normal exit, stage a private one-shot marker for eligible interrupted thread IDs and the destination account/user. The desktop starts its own continuation turns. A retry observes prior delivery instead of sending a second prompt. Failed/stopped newer turns and unconfirmed continuation need attention.
 
-Private/unmanaged stdio backends cannot be inspected or controlled by the manager. They may require finishing/closing the desktop manually before a managed launch. Native state-format checks and isolated backend tests do not prove live native UI/tool recovery. The current running desktop was not stopped during development.
+An existing private desktop needs one safe close after work finishes. Profiles then launches it with a desktop-only transport adapter, pinned profile/catalog paths and the native tool configuration. The manager verifies its GUI/adapter/backend chain, socket peer and cached credential/workspace; global CLI launchers remain independent. An actual native GUI fixture with synthetic accounts confirms one continuation on the same controlled backend, preserving chat/model/cwd. Every native external tool, cloud session and terminal/RAM state remains outside that fixture’s proof.
+
+The compact desktop summary keeps account cards visible; expand Desktop settings & details for identity, options, history search and repair. Automatic fallback uses the verified running desktop account with recent measured replacement quota. Recent explicit usageLimitExceeded turns can be continued during automatic native recovery; completed, manually resumed, old and unrelated failed turns are excluded. Retrying an already queued native marker only observes it.
 
 ## Codex token renewal
 

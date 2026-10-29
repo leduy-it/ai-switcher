@@ -2,7 +2,7 @@
 
 Michael Le (duyle) needs these features preserved in Michael Le Profiles and in any app that replaces it. The priority is shared local Codex history, separate credentials, visible account email and accurate quota, followed by desktop switching, recovery, automation and the macOS interface.
 
-This is the repository's living requirements reference. Preserve the established requirement indices 1–22. Requirements describe the intended behavior; [TASKS.md](../TASKS.md) records implementation progress, validation limits and release delivery. Record new requirements with new indices instead of renumbering existing ones.
+This is the repository's living requirements reference. Preserve the established requirement indices 1–27. Requirements describe the intended behavior; [TASKS.md](../TASKS.md) records implementation progress, validation limits and release delivery. Record new requirements with new indices instead of renumbering existing ones.
 
 ## Keeping the requirements current
 
@@ -62,6 +62,9 @@ Source implementation, installed-app validation and release publication are sepa
 | 22 | Paste and parse Codex credential JSON, alongside JSON file import |
 | 23 | Restore Codex and Claude Code accounts additively from a provider backup JSON |
 | 24 | Install and upgrade macOS builds through a DMG or Homebrew |
+| 25 | Desktop-first quota fallback, credential reload and original-chat continuation |
+| 26 | Native credential renewal for Codex desktop and CLI |
+| 27 | Copy/Download native JSON and append-only list import |
 
 ## 1 Shared Codex local history
 
@@ -307,6 +310,8 @@ Requirements:
 - With desktop sync enabled, offer Restart & continue active chats (enabled for the owner’s requested desktop-first workflow). Automatically checkpoint/interrupt only when the installed app supports the versioned native updater continuation contract; otherwise wait for active work. Use normal macOS quit and a controlled relaunch, with explicit profile/catalog and desktop-data paths.
 - Preserve session/sidebar/project state. Never copy or symlink auth.json into a shared credential location to perform a handoff.
 - If two installed brands share the same live data directory, use one at a time and disclose that limitation.
+- Managed launches use a desktop-scoped CLI transport adapter to the same native backend that owns GUI tools. Preserve native CLI configuration and tool messages; expose a private Unix socket whose peer PID and GUI → adapter → native process chain are verified. Keep the credential in the canonical profile, with no auth copy or auth symlink. Native startup policy/version/helper commands delegate unchanged. Do not assume an environment flag selects the daemon: native tool overrides can force stdio.
+- Handle normal GUI termination signals and reap only the adapter's own backend. Refuse overlapping profile owners; only stop a proven idle destination daemon with no other CLI/proxy clients, active turns or background terminals.
 - Unknown/unmanaged execution profiles wait for the user to finish and close them. Do not interrupt unrelated CLI clients or force-quit active apps.
 - Unsupported API/proxy/cloud/client configurations show a clear need for attention.
 
@@ -320,7 +325,9 @@ Requirements:
 - Watch relevant credential changes from CLI or Desktop while the manager runs, without logging token content.
 - Refresh only the affected identity and broadcast the updated snapshot to main app, dropdown and overlay.
 - Display CLI selected, desktop pending/waiting, desktop confirmed and failure states separately.
-- Invalidate a stale desktop identity confirmation after a credential change or failed verification.
+- Invalidate a stale desktop identity confirmation after a credential change, backend PID change or failed verification.
+- Poll the verified running desktop account promptly while automatic desktop switching is enabled, independently of the CLI selection. Choose only recent measured healthy replacement quota; skip redundant selection/file/timestamp writes while the same handoff waits.
+- Keep the desktop summary compact above account cards; settings/details expand separately. Wrap header/export controls on narrow windows. Explain disabled force/recovery actions and permit cancellation/settings edits while safely waiting before interruption.
 - Reconcile enabled desktop sync at manager startup, and queue it directly after an automatic quota selection. A pending recovery with saved sessions blocks further account rotation.
 - With desktop sync enabled, an external CLI selection or selected-profile credential mismatch queues
   a controlled reload. Token changes that still match the backend identity do not restart it.
@@ -335,7 +342,8 @@ Requirements:
 - Restart & continue uses native desktop continuation when the installed version and reachable local backend support it. Disable that option to wait for active turns. Private/unmanaged stdio runtimes remain explicit limitations; detecting the native marker format alone does not prove a live native handoff.
 - An explicit Switch now and recover action may checkpoint and interrupt eligible local desktop work. Native automatic recovery preflights target account/user IDs, thread IDs and pending resume markers before any interruption; repeats checks after normal exit; stages a one-shot account-bound marker with a 15-minute expiry. The desktop owns the empty continuation turn and its client tools.
 - Save a private durable checkpoint before interruption: operation, host/app, thread/turn, cwd/worktree, old/new profile, model, execution/approval/sandbox policies, terminal metadata and last recorded results.
-- Confirm the interruption and new desktop identity before continuing in the original thread.
+- Confirm the interruption and new desktop identity before continuing in the original thread. For automatic quota fallback only, an eligible loaded chat whose last turn explicitly failed with native usageLimitExceeded within six minutes may be checkpointed for native continuation without another interrupt. Completed, old, rate-limited or other failed turns are excluded.
+- Bind quota preflight to the saved destination account/profile/catalog and recheck after network reads and before each interruption. Re-read the original last turn before handoff; newer user activity cancels that continuation.
 - Preserve execution context; ask the resumed agent to inspect actual files/processes and continue after the last completed step.
 - Persist send intent and acknowledgement. Check original history after uncertain delivery and never blindly resend a continuation. Native retries only observe existing continuation; never restage an uncertain native request. New failed/stopped turns are not reported as successfully continued.
 - Do not automatically resume completed work, a user-stopped/resumed session, pending approvals, inaccessible cloud work, ephemeral sessions or unsupported client-owned tool runtimes. Uncertain external effects need attention.

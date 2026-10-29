@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.16.1 — Managed desktop quota recovery and compact UI (local macOS build)
+
+- Preserve the native desktop CLI/tool configuration through a private stdio-to-Unix-WebSocket adapter. Verify the live GUI/adapter/backend process chain, socket peer, cached credential and workspace before reporting desktop identity. Delegate startup policy/version/helper commands to the native CLI.
+- Gracefully clean up the adapter-owned backend on normal GUI termination; never stop an unrelated CLI/proxy. Keep existing private desktop work waiting for one safe close before managed launch.
+- Poll the actual verified desktop account for quota, require fresh healthy replacements, avoid repeated CLI selection writes and bind preflight to the saved target. Recheck original turns so completed or manually resumed work is not continued again. Handle recent explicit usageLimitExceeded turns in automatic native recovery.
+- Preserve hard native renewal rejection categories through RPC and keep retry cooldowns account-specific. Existing Copy/Download native JSON and append-only bulk import remain supported.
+- Compact desktop status and expandable controls keep account cards visible; wrap header/export actions and explain unavailable recovery actions. Safe waiting does not lock settings or repeatedly rewrite/broadcast state.
+- Actual native GUI fixture with synthetic OAuth and loopback inference confirmed credential A → B, the same chat/model/cwd and exactly one completed native continuation on the controlled backend. Provider-wide quota exhaustion, every native client tool and terminal/RAM restoration are not certified by this fixture.
+
 ## 0.16.0 — Codex sharing and desktop recovery (local macOS build)
 
 - Copy JSON directly through the native clipboard, or download JSON. Export one Codex OAuth account as its native auth.json object, or all as one JSON array of native auth objects. No custom backup wrapper, config, quota or session data is included. Keep atomic private file writes; report skipped unavailable/API sources.

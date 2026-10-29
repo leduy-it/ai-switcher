@@ -1,6 +1,6 @@
 [package]
 name = "ai-account-switcher"
-version = "0.16.0"
+version = "0.16.1"
 description = "Desktop account manager for AI coding tools"
 authors = ["Michael Le"]
 license = "MIT"
