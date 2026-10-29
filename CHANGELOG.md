@@ -1,14 +1,16 @@
 # Changelog
 
-## Unreleased — Codex sharing and desktop recovery
+## 0.16.0 — Codex sharing and desktop recovery (local macOS build)
 
-- Export one Codex OAuth account as its native auth.json object, or all as one JSON array of native auth objects. No custom backup wrapper, config, quota or session data is included. Keep atomic private file writes; report skipped unavailable/API sources.
+- Copy JSON directly through the native clipboard, or download JSON. Export one Codex OAuth account as its native auth.json object, or all as one JSON array of native auth objects. No custom backup wrapper, config, quota or session data is included. Keep atomic private file writes; report skipped unavailable/API sources.
 - Import native Codex auth objects/arrays through the JSON import control, with metadata-only preview and per-account checkboxes. Reject a selected import if the file changed after preview. Keep existing single-account import and schema-v1 backups compatible.
 - Resolve the machine-default account within its provider; keep hidden active profiles identifiable so automation can leave them. Exclude API profiles and unmeasured quota from automatic replacements.
 - Queue enabled desktop handoff directly after quota auto-selection and reconcile it at startup; distinguish selected, queued and verified desktop states.
 - Add Restart & continue active chats, with native updater contract detection, preflight before interruption, account-bound one-shot resume markers after normal quit and observation-only retries. Retain safe waiting for unsupported/private backends; native end-to-end app recovery remains unverified in the live installation.
 - Renew expiring Codex access tokens through native auth-only account/read: use the owning reachable desktop backend or an idle-profile process, serialize/cool down attempts and validate renewed identity/freshness. Never compete with active private desktop/CLI clients, send inference or execute tools for renewal. Show Needs renewal on auth rejection.
-- Installed app and published release remain unchanged by this source update.
+- Single and bulk import reject duplicate refresh credentials even without optional identity claims. Bulk import appends selected new accounts under an import lock and preserves the existing pool/credentials/selection on duplicates or failure.
+- Isolate idle native renewal from shared history backfill; retain uncertain rotated credentials privately, preserve provider rejection reasons and refresh proactively within ten minutes of expiry.
+- Local arm64 macOS build; published GitHub release/Homebrew remain unchanged.
 
 ## 0.15.4 — Codex credential clipboard import and quota errors
 

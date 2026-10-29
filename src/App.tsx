@@ -717,7 +717,7 @@ export function App() {
                 </div>
               </div>
               <div className="actions">
-                <CredentialExportButton toolId={currentTool.id} notify={notify} />
+                <CredentialExportControls toolId={currentTool.id} notify={notify} />
                 {currentTool.id === "antigravity" && (
                   <button
                     onClick={() =>
@@ -1189,7 +1189,7 @@ function SettingsView({
         <div className="settingsSection">
           <div className="settingsSectionHead"><Download /><div><strong>Export credentials</strong><small>Raw authentication, available account email, profile fields, quota and usage at export time.</small></div></div>
           <p className="orphanHint">Exports contain plaintext tokens/API keys plus account, quota, usage and project-attribution details. Hidden accounts are included. Store privately and share only with trusted people.</p>
-          <div className="credentialExportActions"><CredentialExportButton toolId={null} notify={notify} />{snapshot.tools.map((tool) => <CredentialExportButton key={tool.id} toolId={tool.id} notify={notify} />)}</div>
+          <div className="credentialExportActions"><CredentialExportControls toolId={null} notify={notify} />{snapshot.tools.map((tool) => <CredentialExportControls key={tool.id} toolId={tool.id} notify={notify} />)}</div>
           <div className="credentialImportBlock">
             <div className="settingsSectionHead"><Upload /><div><strong>Import a credential backup</strong><small>Add Codex and Claude Code subscription or API / Proxy accounts from this app’s JSON export.</small></div></div>
             <p className="orphanHint">Backup JSON contains plaintext tokens or API keys. Import only a file you trust. New profiles are appended and duplicates are skipped; local accounts and chat history are not replaced or transferred. Claude OAuth is restored to a private profile and macOS Keychain. Refresh tokens may rotate, so avoid using one login on multiple computers at the same time.</p>
@@ -1212,20 +1212,31 @@ function SettingsView({
   );
 }
 
-function CredentialExportButton({ toolId, account, disabled = false, notify }: { toolId: ToolId | null; account?: Account; disabled?: boolean; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
-  const [exporting, setExporting] = useState(false);
+function CredentialExportControls({ toolId, account, disabled = false, notify }: { toolId: ToolId | null; account?: Account; disabled?: boolean; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
+  const [exporting, setExporting] = useState<"copy" | "download" | null>(null);
   const label = account ? account.name : toolId ? `${toolId === "codex" ? "Codex" : toolId === "claude" ? "Claude" : toolId}` : "all providers";
   const exportFile = async () => {
-    setExporting(true);
+    setExporting("download");
     try {
       const path = await saveFileDialog({ title: `Export ${label} credentials (plaintext tokens)`, defaultPath: `michael-profiles-${toolId || "all"}${account ? `-${account.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 60) || "account"}` : ""}-${new Date().toISOString().slice(0, 10)}.json`, filters: [{ name: "Credential backup JSON", extensions: ["json"] }] });
       if (!path) return;
       const result = await api.exportCredentials(path, toolId, true, account?.id ?? null);
       notify(`Exported ${result.accountCount} accounts${result.warningCount ? ` · ${result.warningCount} ${toolId === "codex" ? "invalid/unavailable or API accounts skipped" : "unavailable sources noted in the file"}` : ""}`, result.warningCount ? "info" : "success");
     } catch (error) { notify(errorMessage(error), "error"); }
-    finally { setExporting(false); }
+    finally { setExporting(null); }
   };
-  return <button disabled={exporting || disabled} onClick={() => void exportFile()} title={toolId === "codex" ? account ? "Export this account as native Codex auth.json." : "Export all Codex OAuth accounts as a JSON array of native auth objects." : "Save raw credentials, email, quota and usage to a private JSON file"}>{exporting ? <Loader2 className="spin" size={14} /> : <Download size={14} />}Export {account ? "auth.json" : toolId === "codex" ? "all Codex auth JSON" : label}</button>;
+  const copyJson = async () => {
+    setExporting("copy");
+    try {
+      const result = await api.copyCodexCredentials(account?.id ?? null);
+      notify(`Copied ${result.accountCount} accounts as native Codex JSON${result.warningCount ? ` · ${result.warningCount} invalid/unavailable or API accounts skipped` : ""}`, result.warningCount ? "info" : "success");
+    } catch (error) { notify(errorMessage(error), "error"); }
+    finally { setExporting(null); }
+  };
+  return <span className="credentialExportActions">
+    {toolId === "codex" && <button disabled={exporting !== null || disabled} onClick={() => void copyJson()} title="Copy native Codex auth JSON to clipboard">{exporting === "copy" ? <Loader2 className="spin" size={14} /> : <Copy size={14} />}{account ? "Copy JSON" : "Copy all JSON"}</button>}
+    <button disabled={exporting !== null || disabled} onClick={() => void exportFile()} title={toolId === "codex" ? account ? "Download this account as native Codex auth.json." : "Download all Codex OAuth accounts as a JSON array of native auth objects." : "Save raw credentials, email, quota and usage to a private JSON file"}>{exporting === "download" ? <Loader2 className="spin" size={14} /> : <Download size={14} />}{toolId === "codex" ? account ? "Download JSON" : "Download all JSON" : `Export ${label}`}</button>
+  </span>;
 }
 
 function CredentialImportControl({ notify, initialScope = null }: { initialScope?: ToolId | null; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
@@ -1311,6 +1322,7 @@ function CredentialImportControl({ notify, initialScope = null }: { initialScope
       </select>
     </label>}
     {preview && <div className="credentialImportPreview">
+      <p>Append selected new accounts. Your existing pool and credentials stay unchanged; duplicate logins are skipped.</p>
       {preview.accounts.length > 0 ? <ul>{preview.accounts.map((account, index) => <li key={`${account.toolId}-${account.name}-${index}`}>
         <input type="checkbox" aria-label={`Import ${account.email || account.name}`} disabled={busy || account.alreadyAdded} checked={!account.alreadyAdded && !excluded.includes(index)} onChange={(event) => setExcluded((current) => event.target.checked ? current.filter((item) => item !== index) : [...current, index])} />
         <span><strong>{account.toolId === "codex" ? "Codex" : "Claude Code"} · {account.name || "Imported account"}</strong><small>{account.email || account.kind}</small></span>
@@ -2624,7 +2636,7 @@ function AccountCard({
   const isActive = account.id === tool.activeAccountId || account.state === "active";
   const exhausted = account.state === "exhausted";
   const needsLogin = account.state === "needs-login";
-  const authRejected = !isApi && /\b40[13]\b|verifiably fresh access token/.test(account.quota?.error ?? "");
+  const authRejected = !isApi && /\b40[13]\b|verifiably fresh access token|refresh token/.test(account.quota?.error ?? "");
   const credentialInvalid = !isApi && /workspace or user identity|valid Codex auth file/.test(account.quota?.error ?? "");
   const weeklyLock = account.weeklyLock;
   const locked = weeklyLock?.locked === true;
@@ -2826,7 +2838,7 @@ function AccountCard({
           </button>
         )}
         {tool.id === "codex" && !isApi && (
-          <CredentialExportButton toolId="codex" account={account} disabled={busy !== null} notify={notify} />
+          <CredentialExportControls toolId="codex" account={account} disabled={busy !== null} notify={notify} />
         )}
         {!account.isDefault && !isVirtualApi && (
           <button className="iconButton danger" onClick={onDelete} disabled={busy !== null} title="Delete">

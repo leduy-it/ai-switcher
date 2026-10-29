@@ -35,6 +35,82 @@ fn read_source(
     }
 }
 
+/// Secret-bearing Rust-only payload: deliberately not serializable to the webview.
+pub struct NativeCodexDocument {
+    pub bytes: Vec<u8>,
+    pub account_count: usize,
+    pub warning_count: usize,
+}
+
+pub fn native_codex_document(
+    profiles: Vec<(Account, PathBuf)>,
+    account_id: Option<&str>,
+    include_hidden: bool,
+) -> Result<NativeCodexDocument> {
+    let profiles: Vec<_> = profiles
+        .into_iter()
+        .filter(|(account, _)| {
+            account.tool_id == ToolId::Codex
+                && (include_hidden || !account.hidden)
+                && account_id.is_none_or(|id| id == account.id)
+        })
+        .collect();
+    if account_id.is_some() {
+        anyhow::ensure!(
+            profiles.len() == 1,
+            "The selected Codex account is no longer available"
+        );
+    }
+    let mut auths = Vec::new();
+    let mut single_raw = None;
+    let mut warning_count = 0;
+    for (account, dir) in &profiles {
+        if account.api_provider.is_some() {
+            warning_count += 1;
+            continue;
+        }
+        let parsed = (|| -> Result<(String, Value)> {
+            use std::io::Read;
+            let mut raw = String::new();
+            fs::File::open(dir.join("auth.json"))?
+                .take(1024 * 1024 + 1)
+                .read_to_string(&mut raw)?;
+            anyhow::ensure!(
+                raw.len() <= 1024 * 1024,
+                "Codex auth.json is larger than 1 MB"
+            );
+            let (_, auth) = crate::codex_import::load(&crate::models::CodexAuthSourceInput {
+                auth_file_path: None,
+                auth_json: Some(raw.clone()),
+            })?;
+            Ok((raw, auth))
+        })();
+        match parsed {
+            Ok((raw, auth)) => {
+                if account_id.is_some() {
+                    single_raw = Some(raw.into_bytes());
+                }
+                auths.push(auth);
+            }
+            Err(_) => warning_count += 1,
+        }
+    }
+    anyhow::ensure!(
+        !auths.is_empty(),
+        "No valid Codex OAuth auth.json is available; API/proxy accounts use credential backups"
+    );
+    let account_count = auths.len();
+    let bytes = match single_raw {
+        Some(raw) => raw,
+        None => serde_json::to_vec_pretty(&auths)?,
+    };
+    Ok(NativeCodexDocument {
+        bytes,
+        account_count,
+        warning_count,
+    })
+}
+
 pub fn save(
     input: CredentialsExportInput,
     profiles: Vec<(Account, PathBuf)>,
@@ -71,46 +147,11 @@ pub fn save(
             input.tool_id == Some(ToolId::Codex),
             "Choose Codex for native auth export"
         );
-        let mut auths = Vec::new();
-        let mut single_raw = None;
-        let mut warning_count = 0;
-        for (account, dir) in &profiles {
-            if account.api_provider.is_some() {
-                warning_count += 1;
-                continue;
-            }
-            let parsed = (|| -> Result<(String, Value)> {
-                use std::io::Read;
-                let mut raw = String::new();
-                fs::File::open(dir.join("auth.json"))?
-                    .take(1024 * 1024 + 1)
-                    .read_to_string(&mut raw)?;
-                anyhow::ensure!(
-                    raw.len() <= 1024 * 1024,
-                    "Codex auth.json is larger than 1 MB"
-                );
-                let (_, auth) = crate::codex_import::load(&crate::models::CodexAuthSourceInput {
-                    auth_file_path: None,
-                    auth_json: Some(raw.clone()),
-                })?;
-                Ok((raw, auth))
-            })();
-            match parsed {
-                Ok((raw, auth)) => {
-                    if input.account_id.is_some() {
-                        single_raw = Some(raw.into_bytes());
-                    }
-                    auths.push(auth);
-                }
-                Err(_) => warning_count += 1,
-            }
-        }
-        anyhow::ensure!(!auths.is_empty(), "No valid Codex OAuth auth.json is available; API/proxy accounts use credential backups");
-        let account_count = auths.len();
-        let bytes = match single_raw {
-            Some(raw) => raw,
-            None => serde_json::to_vec_pretty(&auths)?,
-        };
+        let NativeCodexDocument {
+            bytes,
+            account_count,
+            warning_count,
+        } = native_codex_document(profiles, input.account_id.as_deref(), input.include_hidden)?;
         write_private(&input.path, &bytes)?;
         return Ok(CredentialsExportResult {
             path: input.path,
@@ -309,7 +350,7 @@ pub fn save(
     })
 }
 
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("Choose a destination folder")?;
     let temporary = parent.join(format!(".credential-export-{}.tmp", uuid::Uuid::new_v4()));
     let mut options = fs::OpenOptions::new();
@@ -346,6 +387,32 @@ mod tests {
             "updatedAt": "2026-10-29T00:00:00Z", "hidden": hidden
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn clipboard_document_matches_download_scope_without_wrapping_auth() {
+        let dir = std::env::temp_dir().join(format!("native-copy-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let auth =
+            json!({"tokens":{"access_token":"synthetic","refresh_token":"synthetic-refresh"}});
+        fs::write(dir.join("auth.json"), serde_json::to_vec(&auth).unwrap()).unwrap();
+        let profiles = vec![
+            (account("chosen", "codex", true), dir.clone()),
+            (account("other", "claude", false), dir.clone()),
+        ];
+        let single = native_codex_document(profiles.clone(), Some("chosen"), true).unwrap();
+        assert_eq!(single.account_count, 1);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&single.bytes).unwrap(),
+            auth
+        );
+        let all = native_codex_document(profiles.clone(), None, true).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&all.bytes).unwrap(),
+            json!([auth])
+        );
+        assert!(native_codex_document(profiles, Some("chosen"), false).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

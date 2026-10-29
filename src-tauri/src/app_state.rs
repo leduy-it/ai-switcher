@@ -1082,7 +1082,12 @@ impl ManagedState {
                 .map(|(account_id, config_dir)| {
                     let tid = tool_id.clone();
                     let binary = codex_binary.clone();
-                    std::thread::spawn(move || (account_id, read_quota_with_native_renewal(&tid, &config_dir, binary.as_deref())))
+                    std::thread::spawn(move || {
+                        (
+                            account_id,
+                            read_quota_with_native_renewal(&tid, &config_dir, binary.as_deref()),
+                        )
+                    })
                 })
                 .collect();
             handles.into_iter().filter_map(|h| h.join().ok()).collect()
@@ -1703,6 +1708,31 @@ impl ManagedState {
         crate::tray::rebuild(app);
     }
 
+    pub(crate) fn native_codex_export(
+        &self,
+        account_id: Option<&str>,
+        include_hidden: bool,
+    ) -> Result<crate::credential_export::NativeCodexDocument> {
+        let data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let default_dir = resolved_default_config_dir(&data, &ToolId::Codex);
+        let profiles = data
+            .accounts
+            .iter()
+            .filter(|a| a.tool_id == ToolId::Codex)
+            .map(|a| {
+                (
+                    a.clone(),
+                    account_config_dir_with_default(&self.store, a, &default_dir),
+                )
+            })
+            .collect();
+        drop(data);
+        crate::credential_export::native_codex_document(profiles, account_id, include_hidden)
+    }
+
     /// Raw secrets are collected and saved in Rust; only the file path/counts return to the UI.
     pub fn export_credentials(
         &self,
@@ -1817,7 +1847,12 @@ impl ManagedState {
         selected_indices: Option<&[usize]>,
         fingerprint: Option<&str>,
     ) -> Result<CredentialsImportResult> {
-        let backup = crate::credential_import::load(path, scope)?.select(selected_indices, fingerprint)?;
+        let _import_guard = self
+            .account_switch
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Account import lock unavailable"))?;
+        let backup =
+            crate::credential_import::load(path, scope)?.select(selected_indices, fingerprint)?;
         let mut result = CredentialsImportResult {
             imported_count: 0,
             duplicate_count: 0,
@@ -1990,9 +2025,7 @@ impl ManagedState {
             .data
             .lock()
             .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
-        data.accounts.push(account);
-        if let Err(error) = self.store.save(&data) {
-            data.accounts.retain(|saved| saved.id != id);
+        if let Err(error) = append_imported_account(&self.store, &mut data, account) {
             drop(data);
             let _ = remove_launcher(&full_launcher);
             let _ = delete_account_files(&imported.tool_id, &self.store, &id);
@@ -2248,8 +2281,13 @@ impl ManagedState {
                 .data
                 .lock()
                 .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
-            if *tool_id == ToolId::Codex && data.desktop_sync.settings.enabled
-                && data.desktop_sync.operation.as_ref().is_some_and(|op| !["applied", "cancelled"].contains(&op.phase.as_str()) && !op.sessions.is_empty()) {
+            if *tool_id == ToolId::Codex
+                && data.desktop_sync.settings.enabled
+                && data.desktop_sync.operation.as_ref().is_some_and(|op| {
+                    !["applied", "cancelled"].contains(&op.phase.as_str())
+                        && !op.sessions.is_empty()
+                })
+            {
                 return Ok(());
             }
             // Resolve the account in use from the active-profile file, NOT from `state == Active`:
@@ -2308,7 +2346,10 @@ impl ManagedState {
             name
         };
 
-        let desktop_settings = self.data.lock().ok().and_then(|data| (*tool_id == ToolId::Codex && data.desktop_sync.settings.enabled).then(|| data.desktop_sync.settings.clone()));
+        let desktop_settings = self.data.lock().ok().and_then(|data| {
+            (*tool_id == ToolId::Codex && data.desktop_sync.settings.enabled)
+                .then(|| data.desktop_sync.settings.clone())
+        });
         let desktop_message = if let Some(settings) = desktop_settings {
             match self.apply_desktop_inner(settings) {
                 Ok(()) => "Desktop restart and account verification queued.",
@@ -2398,7 +2439,7 @@ impl ManagedState {
         &self,
         input: crate::models::CodexAuthSourceInput,
     ) -> Result<crate::models::CodexAuthPreview> {
-        let (_, auth) = crate::codex_import::load(&input)?;
+        let (raw_auth, auth) = crate::codex_import::load(&input)?;
         let email = crate::quota::codex_account_email_from_auth(&auth);
         let account_id = crate::quota::codex_account_id_from_auth(&auth);
         let user_id = crate::quota::codex_user_id_from_auth(&auth);
@@ -2414,7 +2455,7 @@ impl ManagedState {
             account_id.as_deref(),
             user_id.as_deref(),
             email.as_deref(),
-        );
+        ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth);
         let token_fields = ["access_token", "refresh_token", "id_token", "account_id"]
             .into_iter()
             .filter(|key| auth["tokens"][*key].as_str().is_some_and(|s| !s.is_empty()))
@@ -2430,6 +2471,10 @@ impl ManagedState {
     /// Import an existing Codex OAuth auth.json into a new isolated Switcher profile.
     /// The source is only read; the copied credential is stored with owner-only permissions.
     pub fn import_codex_account(&self, input: ImportCodexAccountInput) -> Result<AppSnapshot> {
+        let _import_guard = self
+            .account_switch
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Account import lock unavailable"))?;
         let raw_launcher = input.launcher.trim();
         if raw_launcher.is_empty() {
             anyhow::bail!("A custom command is required (e.g. codex-work)");
@@ -2458,7 +2503,7 @@ impl ManagedState {
                 account_id.as_deref(),
                 user_id.as_deref(),
                 email.as_deref(),
-            ) {
+            ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth) {
                 anyhow::bail!("This Codex account is already added");
             }
             (default_dir, binary_path)
@@ -2508,7 +2553,7 @@ impl ManagedState {
                 account_id.as_deref(),
                 user_id.as_deref(),
                 account.account_email.as_deref(),
-            ) {
+            ) || codex_refresh_token_exists(&self.store, &data, &default_dir, &raw_auth) {
                 Err(anyhow::anyhow!("This Codex account is already added"))
             } else {
                 data.accounts.push(account);
@@ -3418,7 +3463,11 @@ impl ManagedState {
         Ok(result)
     }
 
-    pub fn find_local_chats(&self, query: &str, include_archived: bool) -> Result<crate::local_chats::SearchResult> {
+    pub fn find_local_chats(
+        &self,
+        query: &str,
+        include_archived: bool,
+    ) -> Result<crate::local_chats::SearchResult> {
         let sources = {
             let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
             let shared = resolved_default_config_dir(&data, &ToolId::Codex);
@@ -3505,7 +3554,14 @@ impl ManagedState {
                 });
                 let needs_refresh = migration.catalog_threads > 0
                     || crate::desktop_state::needs_refresh(&profile, &shared)?;
-                if crate::desktop::can_reuse_running_desktop(already_running, needs_refresh, already_running && !needs_refresh && self.verify_desktop_identity(&profile, &account.id).is_ok(), resume_threads) {
+                if crate::desktop::can_reuse_running_desktop(
+                    already_running,
+                    needs_refresh,
+                    already_running
+                        && !needs_refresh
+                        && self.verify_desktop_identity(&profile, &account.id).is_ok(),
+                    resume_threads,
+                ) {
                     Ok(())
                 } else {
                     let state_profiles = {
@@ -3516,8 +3572,15 @@ impl ManagedState {
                             .filter(|p| p.is_dir())
                             .collect::<Vec<_>>()
                     };
-                    crate::desktop::apply(&settings, &profile, &shared, false, &state_profiles, resume_threads)
-                        .and_then(|_| self.verify_desktop_identity(&profile, &account.id))
+                    crate::desktop::apply(
+                        &settings,
+                        &profile,
+                        &shared,
+                        false,
+                        &state_profiles,
+                        resume_threads,
+                    )
+                    .and_then(|_| self.verify_desktop_identity(&profile, &account.id))
                 }
             })()
         };
@@ -3917,13 +3980,55 @@ fn account_config_dir_with_default(
     }
 }
 
-fn codex_refresh_token_exists(store: &Store, data: &StoredState, default_dir: &std::path::Path, raw_auth: &str) -> bool {
-    let Ok(auth) = serde_json::from_str::<serde_json::Value>(raw_auth) else { return false; };
-    let Some(refresh) = auth.pointer("/tokens/refresh_token").and_then(serde_json::Value::as_str).filter(|token| !token.is_empty()) else { return false; };
-    data.accounts.iter().filter(|account| account.tool_id == ToolId::Codex && account.api_provider.is_none()).any(|account| {
-        let path = account_config_dir_with_default(store, account, default_dir).join("auth.json");
-        crate::codex_import::load(&crate::models::CodexAuthSourceInput { auth_file_path: Some(path), auth_json: None }).ok().is_some_and(|(_, existing)| existing.pointer("/tokens/refresh_token").and_then(serde_json::Value::as_str) == Some(refresh))
-    })
+/// One append transaction. Existing records and selection are never replaced by an import list.
+fn append_imported_account(store: &Store, data: &mut StoredState, account: Account) -> Result<()> {
+    let id = account.id.clone();
+    anyhow::ensure!(
+        !data.accounts.iter().any(|saved| saved.id == id),
+        "Imported account ID already exists; existing account was left unchanged"
+    );
+    data.accounts.push(account);
+    if let Err(error) = store.save(data) {
+        data.accounts.retain(|saved| saved.id != id);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn codex_refresh_token_exists(
+    store: &Store,
+    data: &StoredState,
+    default_dir: &std::path::Path,
+    raw_auth: &str,
+) -> bool {
+    let Ok(auth) = serde_json::from_str::<serde_json::Value>(raw_auth) else {
+        return false;
+    };
+    let Some(refresh) = auth
+        .pointer("/tokens/refresh_token")
+        .and_then(serde_json::Value::as_str)
+        .filter(|token| !token.is_empty())
+    else {
+        return false;
+    };
+    data.accounts
+        .iter()
+        .filter(|account| account.tool_id == ToolId::Codex && account.api_provider.is_none())
+        .any(|account| {
+            let path =
+                account_config_dir_with_default(store, account, default_dir).join("auth.json");
+            crate::codex_import::load(&crate::models::CodexAuthSourceInput {
+                auth_file_path: Some(path),
+                auth_json: None,
+            })
+            .ok()
+            .is_some_and(|(_, existing)| {
+                existing
+                    .pointer("/tokens/refresh_token")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(refresh)
+            })
+        })
 }
 
 fn codex_identity_exists(
@@ -4436,13 +4541,17 @@ fn active_account_id_for(store: &Store, tool_id: &ToolId, accounts: &[Account]) 
 }
 
 /// Renew through native Codex when ownership permits, then read live quota for that profile.
-fn read_quota_with_native_renewal(tool: &ToolId, profile: &std::path::Path, binary: Option<&std::path::Path>) -> QuotaInfo {
+fn read_quota_with_native_renewal(
+    tool: &ToolId,
+    profile: &std::path::Path,
+    binary: Option<&std::path::Path>,
+) -> QuotaInfo {
     let renewal = if *tool == ToolId::Codex {
         binary.map(|binary| crate::codex_auth::ensure_fresh(binary, profile))
     } else { None };
     let mut quota = read_quota(tool, profile);
     if let Some(Err(error)) = renewal {
-        if error.downcast_ref::<crate::codex_auth::RenewalValidationError>().is_some() {
+        if crate::codex_auth::renewal_requires_attention(&error) {
             quota.error = Some(error.to_string());
         } else if let Some(message) = &mut quota.error {
             if message.contains("401") || message.contains("403") { *message = format!("{message} Native renewal: {error}"); }
@@ -4919,17 +5028,167 @@ mod tests {
     use super::*;
 
     fn synthetic_account(id: &str, tool: &str, default: bool) -> Account {
-        serde_json::from_value(serde_json::json!({"id":id,"toolId":tool,"name":id,"state":"idle","fingerprint":"synthetic","createdAt":"now","updatedAt":"now","isDefault":default})).unwrap()
+        serde_json::from_value(serde_json::json!({"id":id,"toolId":tool,"name":id,"state":"idle","fingerprint":if default {format!("system-default:{tool}")} else {format!("profile:{id}")},"createdAt":"now","updatedAt":"now","isDefault":default})).unwrap()
+    }
+
+    #[test]
+    fn appending_imported_accounts_preserves_existing_pool_and_selection() {
+        let root = std::env::temp_dir().join(format!("append-pool-{}", Uuid::new_v4()));
+        let store = Store::for_test(root.clone()).unwrap();
+        let original = synthetic_account("existing", "codex", false);
+        let mut data = StoredState {
+            accounts: vec![original.clone()],
+            auto_switch: true,
+            ..StoredState::default()
+        };
+        let profile = store.account_dir(&ToolId::Codex, &original.id);
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(profile.join("auth.json"), b"original credential bytes").unwrap();
+        write_active_profile(&ToolId::Codex, &store, &original.id).unwrap();
+        let active = std::fs::read(store.active_profile_path(&ToolId::Codex)).unwrap();
+        append_imported_account(
+            &store,
+            &mut data,
+            synthetic_account("new-a", "codex", false),
+        )
+        .unwrap();
+        append_imported_account(
+            &store,
+            &mut data,
+            synthetic_account("new-b", "codex", false),
+        )
+        .unwrap();
+        assert_eq!(data.accounts.len(), 3);
+        assert_eq!(
+            serde_json::to_value(&data.accounts[0]).unwrap(),
+            serde_json::to_value(&original).unwrap()
+        );
+        let before = std::fs::read(store.state_path()).unwrap();
+        assert!(append_imported_account(
+            &store,
+            &mut data,
+            synthetic_account("existing", "codex", false)
+        )
+        .is_err());
+        assert_eq!(std::fs::read(store.state_path()).unwrap(), before);
+        assert!(data.auto_switch);
+        assert_eq!(
+            std::fs::read(store.active_profile_path(&ToolId::Codex)).unwrap(),
+            active
+        );
+        assert_eq!(
+            std::fs::read(profile.join("auth.json")).unwrap(),
+            b"original credential bytes"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_import_commit_rolls_back_only_the_new_account() {
+        let root = std::env::temp_dir().join(format!("append-failure-{}", Uuid::new_v4()));
+        let store = Store::for_test(root.clone()).unwrap();
+        std::fs::create_dir(store.state_path()).unwrap();
+        let mut data = StoredState {
+            accounts: vec![synthetic_account("existing", "codex", false)],
+            ..StoredState::default()
+        };
+        assert!(append_imported_account(
+            &store,
+            &mut data,
+            synthetic_account("new", "codex", false)
+        )
+        .is_err());
+        assert_eq!(data.accounts.len(), 1);
+        assert_eq!(data.accounts[0].id, "existing");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn repeated_bulk_import_and_empty_selection_leave_existing_pool_untouched() {
+        let root = std::env::temp_dir().join(format!("bulk-append-{}", Uuid::new_v4()));
+        let store = Store::for_test(root.clone()).unwrap();
+        let data = StoredState {
+            accounts: vec![
+                synthetic_account("existing", "codex", false),
+                synthetic_account("claude", "claude", false),
+            ],
+            ..StoredState::default()
+        };
+        let profile = store.account_dir(&ToolId::Codex, "existing");
+        std::fs::create_dir_all(&profile).unwrap();
+        let auth = serde_json::json!({"tokens":{"access_token":"synthetic","refresh_token":"synthetic-refresh"}});
+        std::fs::write(
+            profile.join("auth.json"),
+            serde_json::to_vec(&auth).unwrap(),
+        )
+        .unwrap();
+        store.save(&data).unwrap();
+        let before = std::fs::read(store.state_path()).unwrap();
+        let state = ManagedState {
+            store,
+            api_server: Mutex::new(crate::api_gateway::ApiServerHandle::stopped(
+                &data.api_gateway,
+            )),
+            data: Mutex::new(data),
+            usage_scan: Mutex::new(()),
+            account_switch: Mutex::new(()),
+            priming: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        let preview_single = state.parse_codex_auth(crate::models::CodexAuthSourceInput {
+            auth_file_path: None, auth_json: Some(auth.to_string()),
+        }).unwrap();
+        assert!(preview_single.already_added, "token-only duplicate must be rejected in single import too");
+        let input = root.join("list.json");
+        std::fs::write(
+            &input,
+            serde_json::to_vec(&serde_json::json!([auth,auth,{"invalid":true}])).unwrap(),
+        )
+        .unwrap();
+        for _ in 0..2 {
+            let result = state
+                .import_credentials(&input, Some(&ToolId::Codex), None, None)
+                .unwrap();
+            assert_eq!(result.imported_count, 0);
+            assert_eq!(result.duplicate_count, 1);
+            assert_eq!(result.invalid_count, 1);
+        }
+        let preview = state
+            .preview_credentials_import(&input, Some(&ToolId::Codex))
+            .unwrap();
+        let result = state
+            .import_credentials(
+                &input,
+                Some(&ToolId::Codex),
+                Some(&[]),
+                Some(&preview.fingerprint),
+            )
+            .unwrap();
+        assert_eq!(result.imported_count, 0);
+        assert_eq!(state.data.lock().unwrap().accounts.len(), 2);
+        assert_eq!(std::fs::read(state.store.state_path()).unwrap(), before);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn active_default_is_scoped_to_requested_provider() {
         let root = std::env::temp_dir().join(format!("active-provider-{}", Uuid::new_v4()));
         let store = Store::for_test(root.clone()).unwrap();
-        let accounts = vec![synthetic_account("claude-default","claude",true),synthetic_account("codex-default","codex",true)];
-        assert_eq!(active_account_id_for(&store,&ToolId::Codex,&accounts).as_deref(),Some("codex-default"));
-        assert_eq!(active_account_id_for(&store,&ToolId::Claude,&accounts).as_deref(),Some("claude-default"));
-        assert_eq!(active_account_id_for(&store,&ToolId::Cursor,&accounts),None);
+        let accounts = vec![
+            synthetic_account("claude-default", "claude", true),
+            synthetic_account("codex-default", "codex", true),
+        ];
+        assert_eq!(
+            active_account_id_for(&store, &ToolId::Codex, &accounts).as_deref(),
+            Some("codex-default")
+        );
+        assert_eq!(
+            active_account_id_for(&store, &ToolId::Claude, &accounts).as_deref(),
+            Some("claude-default")
+        );
+        assert_eq!(
+            active_account_id_for(&store, &ToolId::Cursor, &accounts),
+            None
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -14,6 +14,7 @@ import type {
   OverlaySettings,
   AutoPrimeSettings,
   CredentialsExportResult,
+  CredentialsCopyResult,
   CredentialsImportPreview,
   CredentialsImportResult,
   SystemLoad,
@@ -714,6 +715,7 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
 export const api = {
   getAutoPrimeSettings: () => invoke<AutoPrimeSettings>("get_auto_prime_settings"),
   setAutoPrimeSettings: (input: AutoPrimeSettings) => invoke<AutoPrimeSettings>("set_auto_prime_settings", { input }),
+  copyCodexCredentials: (accountId: string | null, includeHidden = true) => invoke<CredentialsCopyResult>("copy_codex_credentials", { accountId, includeHidden }),
   exportCredentials: (path: string, toolId: ToolId | null, includeHidden: boolean, accountId: string | null = null) => invoke<CredentialsExportResult>("export_credentials", { input: { path, toolId, includeHidden, accountId, nativeCodex: toolId === "codex" } }),
   previewCredentialsImport: (path: string, toolId: ToolId | null) => invoke<CredentialsImportPreview>("preview_credentials_import", { path, toolId }),
   importCredentials: (path: string, toolId: ToolId | null, selectedIndices: number[] | null = null, fingerprint: string | null = null) => invoke<CredentialsImportResult>("import_credentials", { path, toolId, selectedIndices, fingerprint }),

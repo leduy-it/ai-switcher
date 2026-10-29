@@ -234,7 +234,11 @@ fn open_desktop_thread(state: State<'_, ManagedState>, thread_id: String) -> Res
 }
 
 #[tauri::command]
-async fn find_local_chats(app: tauri::AppHandle, query: String, include_archived: bool) -> Result<local_chats::SearchResult, String> {
+async fn find_local_chats(
+    app: tauri::AppHandle,
+    query: String,
+    include_archived: bool,
+) -> Result<local_chats::SearchResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<ManagedState>().find_local_chats(&query, include_archived).map_err(display_error)
     }).await.map_err(|error| error.to_string())?
@@ -608,6 +612,32 @@ fn set_auto_prime_settings(
 }
 
 #[tauri::command]
+async fn copy_codex_credentials(
+    app: tauri::AppHandle,
+    account_id: Option<String>,
+    include_hidden: bool,
+) -> Result<models::CredentialsCopyResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_clipboard_manager::ClipboardExt;
+        let document = app
+            .state::<ManagedState>()
+            .native_codex_export(account_id.as_deref(), include_hidden)
+            .map_err(display_error)?;
+        let text = String::from_utf8(document.bytes)
+            .map_err(|_| "Codex auth JSON is not valid UTF-8".to_string())?;
+        app.clipboard()
+            .write_text(text)
+            .map_err(|_| "Could not write Codex JSON to the clipboard".to_string())?;
+        Ok(models::CredentialsCopyResult {
+            account_count: document.account_count,
+            warning_count: document.warning_count,
+        })
+    })
+    .await
+    .map_err(|_| "Credential copy worker failed".to_string())?
+}
+
+#[tauri::command]
 async fn export_credentials(
     app: tauri::AppHandle,
     input: models::CredentialsExportInput,
@@ -647,7 +677,12 @@ async fn import_credentials(
     let app2 = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         app2.state::<ManagedState>()
-            .import_credentials(&path, tool_id.as_ref(), selected_indices.as_deref(), fingerprint.as_deref())
+            .import_credentials(
+                &path,
+                tool_id.as_ref(),
+                selected_indices.as_deref(),
+                fingerprint.as_deref(),
+            )
             .map_err(display_error)
     })
     .await
@@ -734,6 +769,7 @@ pub fn run() {
             get_auto_prime_settings,
             set_auto_prime_settings,
             export_credentials,
+            copy_codex_credentials,
             preview_credentials_import,
             import_credentials,
             set_overlay_settings,

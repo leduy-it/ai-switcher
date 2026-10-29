@@ -583,3 +583,5 @@ export interface UsageReport {
   priceStatus: string;
   priceUpdatedAt: string | null;
 }
+
+export interface CredentialsCopyResult { accountCount: number; warningCount: number; }

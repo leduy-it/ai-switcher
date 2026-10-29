@@ -737,6 +737,13 @@ pub struct CredentialsExportResult {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CredentialsCopyResult {
+    pub account_count: usize,
+    pub warning_count: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CredentialsImportPreviewAccount {
     pub tool_id: ToolId,
     pub name: String,
