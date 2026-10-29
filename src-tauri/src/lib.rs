@@ -1,5 +1,6 @@
 mod api_gateway;
 mod app_state;
+mod codex_auth;
 mod codex_import;
 mod credential_export;
 mod credential_import;

@@ -1071,13 +1071,18 @@ impl ManagedState {
             }
         }
 
+        let codex_binary = {
+            let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            configured_binary_path(&data, &ToolId::Codex)
+        };
         // Phase 2: fetch all quotas in parallel (no mutex held).
         let results: Vec<(String, QuotaInfo)> = {
             let handles: Vec<_> = accounts_info
                 .into_iter()
                 .map(|(account_id, config_dir)| {
                     let tid = tool_id.clone();
-                    std::thread::spawn(move || (account_id, read_quota(&tid, &config_dir)))
+                    let binary = codex_binary.clone();
+                    std::thread::spawn(move || (account_id, read_quota_with_native_renewal(&tid, &config_dir, binary.as_deref())))
                 })
                 .collect();
             handles.into_iter().filter_map(|h| h.join().ok()).collect()
@@ -1176,8 +1181,12 @@ impl ManagedState {
             return self.snapshot();
         };
 
-        // Phase 2: HTTP call — no mutex held.
-        let quota = read_quota(tool_id, &config_dir);
+        // Phase 2: native auth renewal and HTTP call — no state mutex held.
+        let codex_binary = {
+            let data = self.data.lock().map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            configured_binary_path(&data, &ToolId::Codex)
+        };
+        let quota = read_quota_with_native_renewal(tool_id, &config_dir, codex_binary.as_deref());
 
         // Phase 3: write back — brief lock.
         let (exhausted, lock_change): (Option<Account>, Option<bool>) = {
@@ -1410,7 +1419,7 @@ impl ManagedState {
                 anyhow::bail!("This account is hidden — unhide it first");
             }
             // Token renewal only applies to Claude subscription (OAuth) accounts. Codex owns its own
-            // ~8-day token lifecycle, and API-proxy accounts have no OAuth token to refresh.
+            // managed lifecycle (native renewal runs before quota reads), and API profiles have no OAuth token to refresh.
             if account.tool_id != ToolId::Claude || account.api_provider.is_some() {
                 anyhow::bail!("Chỉ làm mới được token cho tài khoản Claude đăng nhập subscription");
             }
@@ -4424,6 +4433,22 @@ fn active_account_id_for(store: &Store, tool_id: &ToolId, accounts: &[Account]) 
             .find(|account| account.tool_id == *tool_id && account.is_default)
             .map(|account| account.id.clone()),
     }
+}
+
+/// Renew through native Codex when ownership permits, then read live quota for that profile.
+fn read_quota_with_native_renewal(tool: &ToolId, profile: &std::path::Path, binary: Option<&std::path::Path>) -> QuotaInfo {
+    let renewal = if *tool == ToolId::Codex {
+        binary.map(|binary| crate::codex_auth::ensure_fresh(binary, profile))
+    } else { None };
+    let mut quota = read_quota(tool, profile);
+    if let Some(Err(error)) = renewal {
+        if error.downcast_ref::<crate::codex_auth::RenewalValidationError>().is_some() {
+            quota.error = Some(error.to_string());
+        } else if let Some(message) = &mut quota.error {
+            if message.contains("401") || message.contains("403") { *message = format!("{message} Native renewal: {error}"); }
+        }
+    }
+    quota
 }
 
 /// The account's highest % used (5h or weekly); 0 if there's no data.

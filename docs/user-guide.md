@@ -245,3 +245,9 @@ Enable Codex auto-switch at your preferred threshold and **Apply desktop when se
 The native path follows the installed app’s update recovery contract: after normal exit, stage a private one-shot marker for eligible interrupted thread IDs and the destination account/user. The desktop starts its own continuation turns. A retry observes prior delivery instead of sending a second prompt. Failed/stopped newer turns and unconfirmed continuation need attention.
 
 Private/unmanaged stdio backends cannot be inspected or controlled by the manager. They may require finishing/closing the desktop manually before a managed launch. Native state-format checks and isolated backend tests do not prove live native UI/tool recovery. The current running desktop was not stopped during development.
+
+## Codex token renewal
+
+Codex desktop/CLI normally renew their own managed login. The manager previously kept reading stale auth.json copies. Quota refresh now asks native Codex to renew an expiring access token: through its owning reachable desktop backend, or through an auth-only native process for an idle profile. It sends no inference. Active private desktop/CLI ownership is left to that client; close it or renew there if the manager cannot safely attach. An auth rejection shows **Needs renewal**, not Ready. The expiry of an id_token alone does not mean the access token has expired.
+
+Exported auth files are copies, not ongoing sync between machines. Native renewal can still fail if the shared refresh credential was replaced/revoked; in that case obtain a current auth.json from the working client or sign in. Source and fixture validation do not establish that a real-provider refresh grant has succeeded.

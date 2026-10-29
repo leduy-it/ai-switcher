@@ -20,7 +20,8 @@ A macOS app for managing and switching accounts for Claude Code, Codex, and Anti
 - Use dedicated CLI accounts, a menu-bar quota view, and an optional floating overlay with CPU/RAM and busiest-app details.
 - Share Codex OAuth accounts as native auth.json files or one JSON array; preview and select accounts for bulk import. Legacy provider/all backups also support Claude Code.
 - Find and reopen local Codex chats across profiles while desktop work continues.
-- Configure automatic account fallback and a local API gateway.
+- Configure automatic account fallback, guarded desktop restart/continuation, and a local API gateway.
+- Renew expiring Codex credentials through native auth for idle or reachable owned profiles; active private clients keep their own renewal.
 
 ## More
 

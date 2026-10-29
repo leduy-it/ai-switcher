@@ -7,6 +7,7 @@
 - Resolve the machine-default account within its provider; keep hidden active profiles identifiable so automation can leave them. Exclude API profiles and unmeasured quota from automatic replacements.
 - Queue enabled desktop handoff directly after quota auto-selection and reconcile it at startup; distinguish selected, queued and verified desktop states.
 - Add Restart & continue active chats, with native updater contract detection, preflight before interruption, account-bound one-shot resume markers after normal quit and observation-only retries. Retain safe waiting for unsupported/private backends; native end-to-end app recovery remains unverified in the live installation.
+- Renew expiring Codex access tokens through native auth-only account/read: use the owning reachable desktop backend or an idle-profile process, serialize/cool down attempts and validate renewed identity/freshness. Never compete with active private desktop/CLI clients, send inference or execute tools for renewal. Show Needs renewal on auth rejection.
 - Installed app and published release remain unchanged by this source update.
 
 ## 0.15.4 — Codex credential clipboard import and quota errors

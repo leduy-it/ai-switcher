@@ -1485,9 +1485,9 @@ fn codex_quota_error(error: anyhow::Error) -> anyhow::Error {
         .map(|error| error.status)
     {
         Some(status @ (401 | 403)) => anyhow::anyhow!(
-            "Codex rejected this credential (HTTP {status}). Open this account's Codex command \
-             and sign in again, or import a current auth.json from the working machine. \
-             Importing JSON does not renew tokens."
+            "Codex rejected the saved access token (HTTP {status}). Refresh quota to let native Codex renew an idle profile. \
+             An active desktop/CLI owns its own renewal. If native renewal fails, import a current auth.json \
+             from the working client or sign in again. Importing JSON does not renew tokens."
         ),
         _ => error,
     }

@@ -459,7 +459,7 @@ Before retiring the original app, report every index and baseline ID. Missing em
 
 ## Requirement history and repository evidence
 
-This reference summarizes the owner's requested features and latest decisions. It preserves indices 1–19 from the original task list, adds older-session recovery as 20, maintained repository documentation as 21, the Codex JSON paste/parse dialog as 22, provider backup restore as 23 and the Homebrew/DMG install path as 24. It summarizes requirements without publishing the private conversation transcript.
+This reference summarizes the owner's requested features and latest decisions. It preserves indices 1–19 from the original task list, adds older-session recovery as 20, maintained repository documentation as 21, the Codex JSON paste/parse dialog as 22, provider backup restore as 23 the Homebrew/DMG install path as 24, desktop-first quota recovery as 25, and native desktop/CLI credential renewal as 26. It summarizes requirements without publishing the private conversation transcript.
 
 Use the current TASKS.md, README.md, CHANGELOG.md and implementation files as evidence of support. Associate a relevant file, release, validation result or remaining limitation with task status. Store machine-specific installation checks and private backup manifests outside public documentation when necessary.
 
@@ -475,3 +475,9 @@ Attach this reference to a destination agent, or give it the repository files. T
 ## 25 Desktop-first quota handoff and continuation
 
 The owner uses the desktop app, not CLI switching as the primary workflow. At the configured Codex quota threshold, select a healthy subscription account, apply its credentials to the chosen desktop backend through a verified restart, and continue the original running local sessions. Investigate the desktop's own update/relaunch recovery path; prefer native continuation for native client tools. Preserve private checkpoints and never assert successful credential application or continuation without confirmation. Record unsupported runtime/version cases clearly. Implement JSON sharing, quota selection and desktop continuation sequentially, independently review, then integrate all repository branch work into remote main.
+
+## 26 Native Codex renewal for desktop and CLI profiles
+
+The owner expects normal Codex renewal instead of treating access-token expiry as logout. Distinguish access-token expiry from a revoked/used refresh credential. Before quota reads, renew expiring Codex access tokens through native managed-auth `account/read(refreshToken: true)`: use the owning inspectable desktop backend or a bounded auth-only native app-server for an idle profile. Do not run a competing refresher under active CLI/private backend ownership. Keep file credentials in Rust, serialize per-profile work, apply a short failure cooldown, execute no inference/tools, and validate unchanged workspace/user identity plus positive new access expiry. Show Needs renewal on auth rejection instead of Ready. A copied file is not a permanent token sync; invalid refresh grants can still require a current auth.json or sign-in. Preserve Claude's separate no-rotation policy.
+
+Acceptance: synthetic auth-only subprocess renews the same identity without turn/start; id-token expiry alone does not trigger access renewal; malformed refreshed access tokens and different users within one workspace are rejected; irrelevant notification floods cannot extend the deadline; child processes terminate on error. Real-provider renewal requires separate live verification, not a fixture-only success claim.

@@ -198,6 +198,16 @@ pub fn validate_catalog_config(profile: &Path, shared: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Inspect only process executable and profile paths. Unknown Codex ownership blocks renewal.
+pub fn profile_is_in_use(profile: &Path) -> bool {
+    let target = profile.canonicalize().unwrap_or_else(|_| profile.to_path_buf());
+    process_records().iter().filter(|process| process.executable.file_name().is_some_and(|name| { let name=name.to_string_lossy().to_ascii_lowercase(); name == "codex" || name.starts_with("codex-") })).any(|process| {
+        let Some(info) = launch_info(process.pid) else { return true; };
+        let home = info.paths.get("CODEX_HOME").cloned().unwrap_or_else(|| crate::tools::default_config_dir(&crate::models::ToolId::Codex));
+        home.canonicalize().unwrap_or(home) == target
+    })
+}
+
 pub fn runtime() -> Vec<DesktopRuntime> {
     let processes = process_records();
     [DesktopApp::Codex, DesktopApp::Chatgpt]

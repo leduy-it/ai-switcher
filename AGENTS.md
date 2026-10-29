@@ -156,3 +156,7 @@
   bucket may send a greeting once per five-hour cooldown; report Hello sent without claiming a new
   window. Never rotate tokens or spawn a CLI/wake daemon to run automatic greetings.
 - Prefer idempotent repair/migration during startup (`ManagedState::heal_active_profiles`) so existing accounts self-heal.
+
+## Codex native renewal (owner request, 2026-10-29)
+
+Before live quota reads, Codex profiles with access tokens expiring within two minutes may renew through native `account/read` with `refreshToken: true`. Use the verified owning desktop backend, or an auth-only short-lived app-server for an idle profile. Do not launch a competing refresher under active CLI/private desktop ownership; do not send inference or execute tools to renew. Serialize per-profile attempts, bound the process, suppress secret-bearing output, validate workspace/user identity and positive access expiry after renewal, then re-read live quota. Claude renewal policy remains unchanged. Real-provider grants were not exercised in development.

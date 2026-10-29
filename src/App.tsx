@@ -2624,6 +2624,8 @@ function AccountCard({
   const isActive = account.id === tool.activeAccountId || account.state === "active";
   const exhausted = account.state === "exhausted";
   const needsLogin = account.state === "needs-login";
+  const authRejected = !isApi && /\b40[13]\b|verifiably fresh access token/.test(account.quota?.error ?? "");
+  const credentialInvalid = !isApi && /workspace or user identity|valid Codex auth file/.test(account.quota?.error ?? "");
   const weeklyLock = account.weeklyLock;
   const locked = weeklyLock?.locked === true;
   const canWeeklyLock = supportsWeeklyLock(tool.id) && !account.isDefault && !isApi;
@@ -2709,8 +2711,8 @@ function AccountCard({
               <Lock /> Locked
             </span>
           ) : (
-            <span className={`badge ${badgeClass(account.state)}`}>
-              {exhausted ? "Out of quota" : isActive ? "In use" : stateLabel(account.state)}
+            <span className={`badge ${authRejected || credentialInvalid ? "bad" : badgeClass(account.state)}`}>
+              {credentialInvalid ? "Needs attention" : authRejected ? "Needs renewal" : exhausted ? "Out of quota" : isActive ? "In use" : stateLabel(account.state)}
             </span>
           )}
         </div>
