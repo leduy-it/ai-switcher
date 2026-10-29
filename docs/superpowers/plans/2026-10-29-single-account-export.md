@@ -8,7 +8,7 @@
 - [x] Add card export and Codex-section bulk import; update guide, requirements and task status.
 - [x] Independent review found native BOM/Unicode parsing and existing token-only dedupe gaps; add regression tests and fixes. Single-read export and accurate skip wording also addressed.
 - [x] Rust suite: 134 passed, 1 authorized-live test ignored. Frontend production build passed.
-- [ ] Commit; later integrate remote histories and push main after desktop tasks.
+- [x] Committed and integrated into main; remote source integration bf04cca verified.
 
 ## Review focus
 Cross-account leakage; stale/mismatched IDs; hidden/default OAuth; API exclusion; missing source reporting; changed-file selection; native and legacy importer interoperability.
