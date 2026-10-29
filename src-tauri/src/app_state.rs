@@ -4392,7 +4392,7 @@ fn active_account_id_for(store: &Store, tool_id: &ToolId, accounts: &[Account]) 
         Some(target) => accounts
             .iter()
             .find(|account| {
-                !account.hidden
+                account.tool_id == *tool_id
                     && !account.is_default
                     && store.account_dir(tool_id, &account.id).to_string_lossy() == target
             })
@@ -4400,7 +4400,7 @@ fn active_account_id_for(store: &Store, tool_id: &ToolId, accounts: &[Account]) 
         // No active file → the plain command uses the machine Default.
         None => accounts
             .iter()
-            .find(|account| account.is_default)
+            .find(|account| account.tool_id == *tool_id && account.is_default)
             .map(|account| account.id.clone()),
     }
 }
@@ -4432,11 +4432,12 @@ fn best_replacement<'a>(
             &account.tool_id == tool_id
                 && !account.hidden
                 && !account.is_locked()
+                && account.api_provider.is_none()
                 && Some(account.id.as_str()) != excluded_account_id
                 && !matches!(account.state, AccountState::NeedsLogin)
                 && max_percent_used(account) < threshold
                 // Skip accounts with no quota data yet (unsure whether any is left).
-                && account.quota.as_ref().is_some_and(|q| q.error.is_none())
+                && account.quota.as_ref().is_some_and(|q| q.error.is_none() && (q.five_hour.percent_used.is_some() || q.weekly.percent_used.is_some()))
         })
         .min_by(|left, right| max_percent_used(left).total_cmp(&max_percent_used(right)))
 }
@@ -4870,6 +4871,44 @@ fn local_time_label_from_iso(iso: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn synthetic_account(id: &str, tool: &str, default: bool) -> Account {
+        serde_json::from_value(serde_json::json!({"id":id,"toolId":tool,"name":id,"state":"idle","fingerprint":"synthetic","createdAt":"now","updatedAt":"now","isDefault":default})).unwrap()
+    }
+
+    #[test]
+    fn active_default_is_scoped_to_requested_provider() {
+        let root = std::env::temp_dir().join(format!("active-provider-{}", Uuid::new_v4()));
+        let store = Store::for_test(root.clone()).unwrap();
+        let accounts = vec![synthetic_account("claude-default","claude",true),synthetic_account("codex-default","codex",true)];
+        assert_eq!(active_account_id_for(&store,&ToolId::Codex,&accounts).as_deref(),Some("codex-default"));
+        assert_eq!(active_account_id_for(&store,&ToolId::Claude,&accounts).as_deref(),Some("claude-default"));
+        assert_eq!(active_account_id_for(&store,&ToolId::Cursor,&accounts),None);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn active_hidden_profile_remains_identifiable_for_auto_replacement() {
+        let root = std::env::temp_dir().join(format!("active-hidden-{}", Uuid::new_v4()));
+        let store = Store::for_test(root.clone()).unwrap();
+        let mut account = synthetic_account("hidden","codex",false);
+        account.hidden=true;
+        std::fs::create_dir_all(store.account_dir(&ToolId::Codex, &account.id)).unwrap();
+        write_active_profile(&ToolId::Codex,&store,&account.id).unwrap();
+        assert_eq!(active_account_id_for(&store,&ToolId::Codex,&[account]).as_deref(),Some("hidden"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn replacement_requires_measured_subscription_quota() {
+        let mut unknown = synthetic_account("unknown","codex",false);
+        let mut quota = QuotaInfo::with_message("synthetic"); quota.error=None;
+        unknown.quota=Some(quota.clone());
+        assert!(best_replacement(&[unknown.clone()],&ToolId::Codex,95.0,None).is_none());
+        let mut healthy = synthetic_account("healthy","codex",false);
+        quota.five_hour.percent_used=Some(20.0); healthy.quota=Some(quota);
+        assert_eq!(best_replacement(&[unknown,healthy],&ToolId::Codex,95.0,None).map(|a| a.id.as_str()),Some("healthy"));
+    }
 
     #[test]
     fn native_backup_detects_existing_hidden_token_only_login() {

@@ -422,7 +422,7 @@ These are baseline features documented by the existing app, rather than addition
 | B05 | Antigravity IDE profile/account switching, account avatar/duplicate recognition, and supported IDE quit/reopen flow |
 | B06 | Claude/Codex API or proxy profiles, per-profile provider/key/model configuration and dedicated launchers |
 | B07 | Local API gateway, local keys, account pools, model discovery/combos, fallback/cooldown and gateway usage tracking |
-| B08 | Per-tool auto-switch for supported Claude/Codex quota windows, weekly locks and hidden-account exclusion across launchers, gateway and automatic actions |
+| B08 | Provider-scoped default/active identity, measured subscription-only replacement quota; per-tool auto-switch for supported Claude/Codex quota windows, weekly locks and hidden-account exclusion across launchers, gateway and automatic actions |
 | B09 | Usage and estimated cost reports, provider/all views, date ranges, account/model/project breakdowns, retained attribution for removed accounts and visible unknown/unpriced data |
 | B10 | Settings/data compatibility, macOS menu-bar controls, remembered overlay geometry and existing saved accounts across upgrades |
 
@@ -469,3 +469,7 @@ A future app may use different paths, frameworks or supported APIs if it meets t
 - [Implement an agreed migration](prompts/migration-implementation.md): carry the requirements into a chosen app and keep progress/documentation current.
 
 Attach this reference to a destination agent, or give it the repository files. The audit prompt performs inspection; use the implementation prompt when implementation is requested.
+
+## 25 Desktop-first quota handoff and continuation
+
+The owner uses the desktop app, not CLI switching as the primary workflow. At the configured Codex quota threshold, select a healthy subscription account, apply its credentials to the chosen desktop backend through a verified restart, and continue the original running local sessions. Investigate the desktop's own update/relaunch recovery path; prefer native continuation for native client tools. Preserve private checkpoints and never assert successful credential application or continuation without confirmation. Record unsupported runtime/version cases clearly. Implement JSON sharing, quota selection and desktop continuation sequentially, independently review, then integrate all repository branch work into remote main.
