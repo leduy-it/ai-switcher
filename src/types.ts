@@ -356,6 +356,8 @@ export interface AddAccountInput {
 
 export interface CodexAuthSourceInput { authFilePath?: string; authJson?: string }
 export interface CodexAuthPreview { email: string | null; alreadyAdded: boolean; tokenFields: string[] }
+export interface ReplaceCodexAuthInput extends CodexAuthSourceInput { accountId: string; previewFingerprint?: string }
+export interface CodexAuthReplacementPreview { currentEmail: string | null; incomingEmail: string | null; previewFingerprint: string }
 export interface ImportCodexAccountInput extends CodexAuthSourceInput {
   name: string;
   launcher: string;
@@ -585,3 +587,5 @@ export interface UsageReport {
 }
 
 export interface CredentialsCopyResult { accountCount: number; warningCount: number; }
+
+export interface CodexAuthReplacementResult { snapshot: AppSnapshot; warning: string | null }

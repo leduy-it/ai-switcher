@@ -958,6 +958,30 @@ pub struct ImportCodexAccountInput {
     pub source: CodexAuthSourceInput,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceCodexAuthInput {
+    pub account_id: String,
+    #[serde(flatten)]
+    pub source: CodexAuthSourceInput,
+    #[serde(default)]
+    pub preview_fingerprint: Option<String>,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAuthReplacementPreview {
+    pub current_email: Option<String>,
+    pub incoming_email: Option<String>,
+    pub preview_fingerprint: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAuthReplacementResult {
+    pub snapshot: AppSnapshot,
+    pub warning: Option<String>,
+}
+
 // Intentionally no Debug: pasted JSON contains credential values.
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

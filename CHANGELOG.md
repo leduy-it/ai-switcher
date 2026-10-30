@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.2 — Import auth into an existing Codex profile (local macOS build)
+
+- Add Import auth on each Codex subscription profile, with file/paste and current/imported email preview. Keep the profile ID/name/command/config/history and selected account; native list import still appends.
+- Bind preview to source and existing auth, reject cross-profile duplicate identities/tokens and live owners, serialize with native renewal, retain a private old-auth backup and roll back unchanged writes after metadata failure.
+- Clear old quota, desktop proof and derived weekly lock; preserve reserve settings and restore an old locked command where possible. Report command repair separately from successful auth import. Guard old quota responses and their deferred lock/notification effects with a credential revision.
+- Installed and relaunched on the development Mac with all 12 accounts and 19 credential/config file hashes preserved; native preview checked using fake JSON, then cancelled. No real auth replaced in development. Published release/Homebrew remain unchanged.
+
 ## 0.16.1 — Managed desktop quota recovery and compact UI (local macOS build)
 
 - Preserve the native desktop CLI/tool configuration through a private stdio-to-Unix-WebSocket adapter. Verify the live GUI/adapter/backend process chain, socket peer, cached credential and workspace before reporting desktop identity. Delegate startup policy/version/helper commands to the native CLI.

@@ -737,6 +737,8 @@ export const api = {
   addAccount: (input: AddAccountInput) => invoke<AppSnapshot>("add_account", { input }),
   importCodexAccount: (input: ImportCodexAccountInput) =>
     invoke<AppSnapshot>("import_codex_account", { input }),
+  previewCodexAuthReplacement: (input: import("./types").ReplaceCodexAuthInput) => invoke<import("./types").CodexAuthReplacementPreview>("preview_codex_auth_replacement", { input }),
+  replaceCodexAuth: (input: import("./types").ReplaceCodexAuthInput) => invoke<import("./types").CodexAuthReplacementResult>("replace_codex_auth", { input }),
   parseCodexAuth: (input: import("./types").CodexAuthSourceInput) => invoke<import("./types").CodexAuthPreview>("parse_codex_auth", { input }),
   addApiAccount: (input: AddApiAccountInput) => invoke<AppSnapshot>("add_api_account", { input }),
   fetchGatewayModels: (baseUrl: string, apiKey: string) =>

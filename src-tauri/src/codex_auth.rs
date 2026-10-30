@@ -72,6 +72,23 @@ fn load(profile: &Path) -> Result<Value> {
     .map(|(_, auth)| auth)
 }
 
+/// Shared with explicit credential replacement; canonical paths share one renewal/import owner.
+pub(crate) fn profile_lock(profile: &Path) -> Result<Arc<Mutex<()>>> {
+    static LOCKS: OnceLock<Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let lock = LOCKS
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Credential renewal lock unavailable"))?
+        .entry(
+            profile
+                .canonicalize()
+                .unwrap_or_else(|_| profile.to_path_buf()),
+        )
+        .or_default()
+        .clone();
+    Ok(lock)
+}
+
 /// Refresh through the owning native backend, or a bounded auth-only native process for an idle
 /// profile. Never launch a competing refresher under an active CLI/private desktop.
 pub fn ensure_fresh(binary: &Path, profile: &Path) -> Result<bool> {
@@ -79,14 +96,7 @@ pub fn ensure_fresh(binary: &Path, profile: &Path) -> Result<bool> {
     if !needs_renewal(&before, chrono::Utc::now().timestamp()) {
         return Ok(false);
     }
-    static LOCKS: OnceLock<Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
-    let lock = LOCKS
-        .get_or_init(|| Mutex::new(BTreeMap::new()))
-        .lock()
-        .map_err(|_| anyhow::anyhow!("Credential renewal lock unavailable"))?
-        .entry(profile.to_path_buf())
-        .or_default()
-        .clone();
+    let lock = profile_lock(profile)?;
     let _guard = lock
         .lock()
         .map_err(|_| anyhow::anyhow!("Credential renewal lock unavailable"))?;

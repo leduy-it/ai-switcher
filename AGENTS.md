@@ -95,6 +95,7 @@
   Keychain item and a private profile credential file. Backup import does not restore session,
   history, quota or usage state. Never test with a real exported credential unless the user
   explicitly authorizes that transfer.
+- `codex_replace.rs` handles explicit same-profile Codex auth replacement, separate from append-only list import. Preserve profile ID/name/command/selection/history, keep a private old-auth backup, reject live owners/other-profile duplicates and bind preview to source/target. Share renewal locking; credential revisions must guard quota writes and deferred lock/notification effects. Preserve old creator user-ID/email labels without tokens for Usage.
 - `codex_import.rs` accepts one raw OAuth source: pasted JSON or a file. Parsing is local and has
   no provider calls or account writes. Return email/field names/duplicate status only; never echo
   token values in errors or persist the dialog's pasted JSON outside the private import flow.

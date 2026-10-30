@@ -3894,3 +3894,5 @@ textarea {
 .panel > .panelHead{flex-wrap:wrap;align-items:center;gap:12px}.panel > .panelHead .titleRow{flex-wrap:wrap;min-width:0}.panel > .panelHead .actions{flex-wrap:wrap;align-items:center;justify-content:flex-end;margin-left:auto;max-width:100%}.panel > .panelHead .actions > button{white-space:nowrap}
 .credentialExportActions{display:inline-flex;align-items:center;max-width:100%}.credentialExportActions button{white-space:nowrap}.cardActions{flex-wrap:wrap;align-items:center}.cardActions>.credentialExportActions{flex-basis:100%;padding-top:6px;border-top:1px solid var(--line);margin-top:2px}
 @media(max-width:760px){.panel > .panelHead .actions{justify-content:flex-start;flex-basis:100%;margin-left:0}.panel > .panelHead .actions>.credentialExportActions{flex-wrap:wrap}.panel > .panelHead .actions button{max-width:100%}.cardActions>.credentialExportActions{gap:6px}}
+
+.cardActions>.credentialExportActions{flex-wrap:wrap;row-gap:6px}.modalActions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:18px}.modalActions>button{display:inline-flex;align-items:center;gap:6px}

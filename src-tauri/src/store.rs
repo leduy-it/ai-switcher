@@ -13,6 +13,12 @@ use std::path::PathBuf;
 pub struct StoredState {
     pub disclaimer_accepted: bool,
     pub accounts: Vec<Account>,
+    /// Invalidate quota responses started before an explicit in-place credential import.
+    #[serde(default)]
+    pub codex_auth_revisions: BTreeMap<String, String>,
+    /// Retain known creator labels when a profile imports a different login. No tokens.
+    #[serde(default)]
+    pub codex_user_emails: BTreeMap<String, String>,
     /// Auto-switch the account in use (plain command) when it hits the quota threshold.
     #[serde(default)]
     pub auto_switch: bool,
@@ -50,6 +56,8 @@ impl Default for StoredState {
         Self {
             disclaimer_accepted: false,
             accounts: Vec::new(),
+            codex_auth_revisions: BTreeMap::new(),
+            codex_user_emails: BTreeMap::new(),
             auto_switch: false,
             auto_switch_threshold: default_threshold(),
             auto_switch_settings: BTreeMap::new(),

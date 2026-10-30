@@ -177,6 +177,7 @@ fn save_cache(path: &Path, cache: &UsageCache) {
 /// Scan the given config dirs incrementally, persist the cache, then build the report.
 /// `range_days` limits the totals/chart/tables to the last N local days (0 = all time).
 /// `org_labels` maps Claude org uuids to display info for the per-account split.
+#[cfg(test)]
 pub fn build_report(
     cache_path: &Path,
     price_cache_path: &Path,
@@ -185,11 +186,25 @@ pub fn build_report(
     range_days: u32,
     org_labels: &BTreeMap<String, UsageOrgLabel>,
 ) -> UsageReport {
+    build_report_with_identities(
+        cache_path, price_cache_path, claude_dirs, codex_dirs, range_days, org_labels, &BTreeMap::new(),
+    )
+}
+
+pub fn build_report_with_identities(
+    cache_path: &Path,
+    price_cache_path: &Path,
+    claude_dirs: &[PathBuf],
+    codex_dirs: &[PathBuf],
+    range_days: u32,
+    org_labels: &BTreeMap<String, UsageOrgLabel>,
+    saved_codex_user_emails: &BTreeMap<String, String>,
+) -> UsageReport {
     let mut cache = load_cache(cache_path);
-    let codex_user_emails: BTreeMap<String, String> = codex_dirs
-        .iter()
-        .filter_map(|dir| crate::quota::codex_user_identity(dir))
-        .collect();
+    let mut codex_user_emails = saved_codex_user_emails.clone();
+    codex_user_emails.extend(
+        codex_dirs.iter().filter_map(|dir| crate::quota::codex_user_identity(dir)),
+    );
 
     // The app symlinks the shared session store across profile dirs + the machine default, so the
     // same physical JSONL is reachable from several config dirs. Resolve symlinks and scan each

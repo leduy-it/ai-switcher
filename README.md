@@ -19,6 +19,7 @@ A macOS app for managing and switching accounts for Claude Code, Codex, and Anti
 - View provider quota, account usage, and estimated costs. Codex credential imports handle rich-text clipboard spacing and show actionable sign-in errors when live quota is unavailable.
 - Use dedicated CLI accounts, a menu-bar quota view, and an optional floating overlay with CPU/RAM and busiest-app details.
 - Share Codex OAuth accounts using Copy JSON or Download JSON, as native auth.json objects or one JSON array; preview and select accounts for append-only bulk import. Legacy provider/all backups also support Claude Code.
+- Import a new native auth.json into an existing Codex profile using **Import auth** on its card; keep its name, command and history, with a private old-auth backup. Close clients using that profile first.
 - Find and reopen local Codex chats across profiles while desktop work continues.
 - Configure automatic quota fallback, verified desktop credential reload and native original-chat continuation. Managed launches preserve the desktop tool runtime; an existing private desktop needs one safe close before its first managed launch.
 - Use a compact desktop status panel with expandable settings, separate CLI/desktop identities and responsive account actions.

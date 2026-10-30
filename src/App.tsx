@@ -1,3 +1,4 @@
+import { ReplaceCodexAuthDialog } from "./ReplaceCodexAuthDialog";
 import { DesktopStatus } from "./DesktopStatus";
 import {
   AlarmClock,
@@ -191,6 +192,7 @@ export function App() {
   const [dialog, setDialog] = useState<
     "add" | "rename" | "launcher" | "weeklyLock" | "setup" | null
   >(null);
+  const [replaceAuthAccount, setReplaceAuthAccount] = useState<Account | null>(null);
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
   const [switchNotice, setSwitchNotice] = useState<string | null>(null);
   const [autoSwitchBanner, setAutoSwitchBanner] = useState<string | null>(null);
@@ -806,6 +808,7 @@ export function App() {
                         setBusy(null);
                       }
                     }}
+                    onReplaceAuth={() => setReplaceAuthAccount(account)}
                     onSwitch={() => switchAccount(currentTool, account)}
                     onRename={() => {
                       setSelectedAccount(account);
@@ -917,6 +920,8 @@ export function App() {
           </section>
         )}
       </div>
+
+      {replaceAuthAccount && <ReplaceCodexAuthDialog account={replaceAuthAccount} onClose={() => setReplaceAuthAccount(null)} onUpdate={(next, warning) => { commitSnapshot(next); notify(warning ?? "Imported auth into the existing profile; check its refreshed quota.", warning ? "info" : "success"); }} />}
 
       {dialog === "add" && currentTool && (
         <AddDialog
@@ -1212,7 +1217,7 @@ function SettingsView({
   );
 }
 
-function CredentialExportControls({ toolId, account, disabled = false, notify }: { toolId: ToolId | null; account?: Account; disabled?: boolean; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
+function CredentialExportControls({ toolId, account, disabled = false, notify, onImportAuth }: { toolId: ToolId | null; account?: Account; disabled?: boolean; onImportAuth?: () => void; notify: (text: string, kind?: "success" | "error" | "info") => void }) {
   const [exporting, setExporting] = useState<"copy" | "download" | null>(null);
   const label = account ? account.name : toolId ? `${toolId === "codex" ? "Codex" : toolId === "claude" ? "Claude" : toolId}` : "all providers";
   const exportFile = async () => {
@@ -1234,6 +1239,7 @@ function CredentialExportControls({ toolId, account, disabled = false, notify }:
     finally { setExporting(null); }
   };
   return <span className="credentialExportActions">
+    {onImportAuth && <button disabled={exporting !== null || disabled} onClick={onImportAuth} title="Import another auth.json into this same profile"><Upload size={14} />Import auth</button>}
     {toolId === "codex" && <button disabled={exporting !== null || disabled} onClick={() => void copyJson()} title="Copy native Codex auth JSON to clipboard">{exporting === "copy" ? <Loader2 className="spin" size={14} /> : <Copy size={14} />}{account ? "Copy JSON" : "Copy all JSON"}</button>}
     <button disabled={exporting !== null || disabled} onClick={() => void exportFile()} title={toolId === "codex" ? account ? "Download this account as native Codex auth.json." : "Download all Codex OAuth accounts as a JSON array of native auth objects." : "Save raw credentials, email, quota and usage to a private JSON file"}>{exporting === "download" ? <Loader2 className="spin" size={14} /> : <Download size={14} />}{toolId === "codex" ? account ? "Download JSON" : "Download all JSON" : `Export ${label}`}</button>
   </span>;
@@ -2600,6 +2606,7 @@ function AccountCard({
   busy,
   onPrimeNow,
   onSwitch,
+  onReplaceAuth,
   onRename,
   onSetLauncher,
   onWeeklyLock,
@@ -2618,6 +2625,7 @@ function AccountCard({
   busy: string | null;
   onPrimeNow: () => void;
   onSwitch: () => void;
+  onReplaceAuth: () => void;
   onRename: () => void;
   onSetLauncher: () => void;
   onWeeklyLock: () => void;
@@ -2838,7 +2846,7 @@ function AccountCard({
           </button>
         )}
         {tool.id === "codex" && !isApi && (
-          <CredentialExportControls toolId="codex" account={account} disabled={busy !== null} notify={notify} />
+          <CredentialExportControls toolId="codex" account={account} disabled={busy !== null} notify={notify} onImportAuth={onReplaceAuth} />
         )}
         {!account.isDefault && !isVirtualApi && (
           <button className="iconButton danger" onClick={onDelete} disabled={busy !== null} title="Delete">

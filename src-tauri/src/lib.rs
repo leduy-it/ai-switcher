@@ -2,6 +2,7 @@ mod api_gateway;
 mod app_state;
 mod codex_auth;
 mod codex_import;
+mod codex_replace;
 mod credential_export;
 mod credential_import;
 mod desktop;
@@ -106,6 +107,46 @@ async fn import_codex_account(
     })
     .await
     .map_err(|e| e.to_string())?;
+    tray::rebuild(&app);
+    result
+}
+
+#[tauri::command]
+async fn preview_codex_auth_replacement(
+    app: tauri::AppHandle,
+    input: models::ReplaceCodexAuthInput,
+) -> Result<models::CodexAuthReplacementPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<ManagedState>()
+            .preview_codex_auth_replacement(input)
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn replace_codex_auth(
+    app: tauri::AppHandle,
+    input: models::ReplaceCodexAuthInput,
+) -> Result<models::CodexAuthReplacementResult, String> {
+    let app2 = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = app2.state::<ManagedState>();
+        let id = input.account_id.clone();
+        let warning = state.replace_codex_auth(input).map_err(display_error)?;
+        let _ = state.refresh_single_account(&ToolId::Codex, &id, None);
+        state
+            .snapshot()
+            .map(|snapshot| models::CodexAuthReplacementResult { snapshot, warning })
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    if let Ok(imported) = &result {
+        let snapshot = &imported.snapshot;
+        let _ = app.emit("snapshot-changed", snapshot);
+        let _ = app.emit("usage-changed", ());
+    }
     tray::rebuild(&app);
     result
 }
@@ -241,8 +282,12 @@ async fn find_local_chats(
     include_archived: bool,
 ) -> Result<local_chats::SearchResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<ManagedState>().find_local_chats(&query, include_archived).map_err(display_error)
-    }).await.map_err(|error| error.to_string())?
+        app.state::<ManagedState>()
+            .find_local_chats(&query, include_archived)
+            .map_err(display_error)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -779,6 +824,8 @@ pub fn run() {
             refresh_account,
             add_account,
             import_codex_account,
+            preview_codex_auth_replacement,
+            replace_codex_auth,
             parse_codex_auth,
             add_api_account,
             fetch_gateway_models,

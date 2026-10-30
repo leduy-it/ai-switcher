@@ -2,7 +2,7 @@
 
 Michael Le (duyle) needs these features preserved in Michael Le Profiles and in any app that replaces it. The priority is shared local Codex history, separate credentials, visible account email and accurate quota, followed by desktop switching, recovery, automation and the macOS interface.
 
-This is the repository's living requirements reference. Preserve the established requirement indices 1–27. Requirements describe the intended behavior; [TASKS.md](../TASKS.md) records implementation progress, validation limits and release delivery. Record new requirements with new indices instead of renumbering existing ones.
+This is the repository's living requirements reference. Preserve the established requirement indices 1–28. Requirements describe the intended behavior; [TASKS.md](../TASKS.md) records implementation progress, validation limits and release delivery. Record new requirements with new indices instead of renumbering existing ones.
 
 ## Keeping the requirements current
 
@@ -65,6 +65,7 @@ Source implementation, installed-app validation and release publication are sepa
 | 25 | Desktop-first quota fallback, credential reload and original-chat continuation |
 | 26 | Native credential renewal for Codex desktop and CLI |
 | 27 | Copy/Download native JSON and append-only list import |
+| 28 | Explicitly import new native Codex auth into the same existing profile |
 
 ## 1 Shared Codex local history
 
@@ -495,3 +496,13 @@ Acceptance: synthetic auth-only subprocess renews the same identity without turn
 Offer Copy JSON and Download JSON for individual Codex OAuth accounts and all Codex accounts. Both use the same native auth object/array builder and scope rules. Clipboard secrets are written directly by Rust through the native clipboard plugin; only counts/status return to the webview. Download remains an atomic owner-only JSON file. Bulk import always appends selected new identities, never replaces the existing pool/credentials/selection, skips duplicates and preserves the pool when validation or persistence fails. Serialize bulk/single imports. Both single-account and bulk import reject identical refresh credentials even when optional identity claims are missing, preventing competing copies in the pool.
 
 Native renewal begins within ten minutes of access expiry (covering the five-minute quota poll). Idle renewal uses a private auth-only home without shared session/config links, so history backfill cannot block auth. Preserve any changed/uncertain native credential on every post-native failure, retain explicit provider rejection reasons, and suspend hard failures until the refresh credential changes. Prepare the candidate before final file/ownership rechecks; this manager's lock does not provide an atomic compare-and-swap against unrelated external clients.
+
+## 28 Import different Codex auth into the same profile
+
+Offer an explicit Import auth action on each Codex OAuth profile. Accept a native auth.json file or pasted native JSON, preview current/imported email metadata, then replace only that profile's credential after an explicit import. Preserve its ID/name, custom command name, active selection, user configuration, history and weekly reserve settings. Retain known creator user-ID/email labels separately from credentials so older Usage rows keep their original attribution after changing login. The derived weekly lock, quota and desktop identity proof belong to the old credential and must be cleared/recomputed. Recreate a previously locked profile's command when possible; report repair separately if auth import succeeded but command repair failed.
+
+This explicit flow is separate from Add account and bulk list/backup import, which remain append-only. Allow renewed tokens for the target's own login, but reject another profile's duplicate login/refresh credential. Bind preview to the target ID, original auth and incoming bytes; reject changed source/target. Share the native renewal mutex and switch/import serialization. Refuse active Codex owners and unresolved recovery; never overwrite an active backend's token file. Retain an owner-only private backup; atomically replace auth.json and roll back our own unchanged write if metadata persistence fails. Preserve an external writer's changed auth. Credentials remain in Rust except the user's explicit paste input; preview returns metadata only.
+
+Quota reads started before replacement must not update the new identity or apply old deferred locks/notifications; bind quota results and effects to the credential revision. Refresh quota after import without claiming JSON import renewed tokens. For an eligible selected profile with desktop sync enabled, queue a managed desktop handoff. No actual credential replacement is required during development validation.
+
+Acceptance: synthetic existing-profile import keeps account count/ID/name/command/config/history and selection stable, updates email/auth, backs up old auth privately, accepts own renewed login, rejects duplicates/stale previews/live owners and restores on persistence failure. Native list import still appends. Verify old quota effects cannot lock a replaced login and old weekly usage cannot keep it locked.

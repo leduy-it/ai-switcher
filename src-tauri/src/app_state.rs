@@ -829,13 +829,19 @@ impl ManagedState {
             .lock()
             .map(|data| claude_org_labels(&data.claude_orgs, &data.accounts))
             .unwrap_or_default();
-        crate::usage::build_report(
+        let saved_codex_emails = self
+            .data
+            .lock()
+            .map(|data| data.codex_user_emails.clone())
+            .unwrap_or_default();
+        crate::usage::build_report_with_identities(
             &self.store.usage_cache_path(),
             &self.store.price_cache_path(),
             &self.config_dirs(&ToolId::Claude),
             &self.config_dirs(&ToolId::Codex),
             range_days,
             &org_labels,
+            &saved_codex_emails,
         )
     }
 
@@ -1078,6 +1084,12 @@ impl ManagedState {
                 .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
             configured_binary_path(&data, &ToolId::Codex)
         };
+        let auth_revisions = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .codex_auth_revisions
+            .clone();
         // Phase 2: fetch all quotas in parallel (no mutex held).
         let results: Vec<(String, QuotaInfo)> = {
             let handles: Vec<_> = accounts_info
@@ -1106,6 +1118,12 @@ impl ManagedState {
             let mut exhausted = Vec::new();
             let mut lock_changes = Vec::new();
             for (account_id, quota) in results {
+                if tool_id == ToolId::Codex
+                    && data.codex_auth_revisions.get(&account_id) != auth_revisions.get(&account_id)
+                {
+                    continue;
+                }
+
                 if let Some(account) = data
                     .accounts
                     .iter_mut()
@@ -1141,10 +1159,10 @@ impl ManagedState {
 
         if let Some(app) = app {
             for account in &exhausted_accounts {
-                notify_exhausted(app, account);
+                self.notify_current_exhausted(&tool_id, &account.id, app, &auth_revisions);
             }
         }
-        self.apply_weekly_lock_changes(&tool_id, lock_changes, app);
+        self.apply_weekly_lock_changes(&tool_id, lock_changes, app, &auth_revisions);
 
         let setting = {
             let data = self
@@ -1189,6 +1207,13 @@ impl ManagedState {
             return self.snapshot();
         };
 
+        let auth_revision = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?
+            .codex_auth_revisions
+            .get(account_id)
+            .cloned();
         // Phase 2: native auth renewal and HTTP call — no state mutex held.
         let codex_binary = {
             let data = self
@@ -1205,6 +1230,12 @@ impl ManagedState {
                 .data
                 .lock()
                 .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            if *tool_id == ToolId::Codex
+                && data.codex_auth_revisions.get(account_id).cloned() != auth_revision
+            {
+                drop(data);
+                return self.snapshot();
+            }
             let mut result = None;
             let mut lock_change = None;
             if let Some(account) = data
@@ -1236,13 +1267,17 @@ impl ManagedState {
             (result, lock_change)
         };
 
+        let expected_revisions = auth_revision
+            .map(|revision| (account_id.to_string(), revision))
+            .into_iter()
+            .collect();
         if let (Some(app), Some(account)) = (app, exhausted) {
-            notify_exhausted(app, &account);
+            self.notify_current_exhausted(tool_id, &account.id, app, &expected_revisions);
         }
         let lock_changes = lock_change
             .map(|lock| vec![(account_id.to_string(), lock)])
             .unwrap_or_default();
-        self.apply_weekly_lock_changes(tool_id, lock_changes, app);
+        self.apply_weekly_lock_changes(tool_id, lock_changes, app, &expected_revisions);
 
         let setting = {
             let data = self
@@ -2498,6 +2533,156 @@ impl ManagedState {
         })
     }
 
+    pub fn preview_codex_auth_replacement(
+        &self,
+        input: crate::models::ReplaceCodexAuthInput,
+    ) -> Result<crate::models::CodexAuthReplacementPreview> {
+        let data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        let (preview, _, _) = codex_replacement_payload(&self.store, &data, &input)?;
+        Ok(preview)
+    }
+
+    pub fn replace_codex_auth(
+        &self,
+        input: crate::models::ReplaceCodexAuthInput,
+    ) -> Result<Option<String>> {
+        let _switch = self
+            .account_switch
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Account import lock unavailable"))?;
+        let profile = {
+            let data = self
+                .data
+                .lock()
+                .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+            codex_replacement_target(&self.store, &data, &input.account_id)?
+        };
+        let lock = crate::codex_auth::profile_lock(&profile)?;
+        let _credential = lock
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Credential import lock unavailable"))?;
+        let mut data = self
+            .data
+            .lock()
+            .map_err(|_| anyhow::anyhow!("state lock poisoned"))?;
+        anyhow::ensure!(
+            !data
+                .desktop_sync
+                .operation
+                .as_ref()
+                .is_some_and(|op| operation_blocks_rotation(op)
+                    || (op.target_account_id == input.account_id
+                        && !["applied", "cancelled"].contains(&op.phase.as_str()))),
+            "Finish or cancel the pending desktop switch before changing this credential"
+        );
+        let (preview, checked_profile, raw) =
+            codex_replacement_payload(&self.store, &data, &input)?;
+        anyhow::ensure!(
+            profile == checked_profile,
+            "Profile configuration changed; preview again"
+        );
+        let fingerprint = input
+            .preview_fingerprint
+            .as_deref()
+            .context("Preview this credential before importing")?;
+        anyhow::ensure!(
+            fingerprint == preview.preview_fingerprint,
+            "The source or profile credential changed after preview. Preview again"
+        );
+        let selected = active_account_id_for(&self.store, &ToolId::Codex, &data.accounts);
+        let mut next = data.clone();
+        let prior_auth = crate::codex_replace::current_auth(&profile)?
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        let incoming_auth: serde_json::Value = serde_json::from_str(&raw)?;
+        for auth in prior_auth.iter().chain(std::iter::once(&incoming_auth)) {
+            if let Some((user, email)) = crate::quota::codex_user_identity_from_auth(auth) {
+                next.codex_user_emails.insert(user, email);
+            }
+        }
+        next.codex_auth_revisions
+            .insert(input.account_id.clone(), Uuid::new_v4().to_string());
+        let account = next
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == input.account_id && a.tool_id == ToolId::Codex)
+            .context("Profile no longer exists")?;
+        if account.account_email != preview.incoming_email {
+            account.avatar_url = None;
+        }
+        account.account_email = preview.incoming_email;
+        account.quota = None;
+        account.state = if selected.as_deref() == Some(input.account_id.as_str()) {
+            AccountState::Active
+        } else {
+            AccountState::Idle
+        };
+        account.updated_at = now();
+        let was_locked = account.is_locked();
+        if let Some(lock) = account.weekly_lock.as_mut() {
+            lock.locked = false;
+        }
+        let desktop_eligible = !account.hidden;
+        if next.desktop_sync.last_applied_account_id.as_deref() == Some(input.account_id.as_str()) {
+            next.desktop_sync.confirmed_email = None;
+            next.desktop_sync.confirmed_plan = None;
+            next.desktop_sync.confirmed_at = None;
+            next.desktop_sync.confirmed_backend_pid = None;
+        }
+        let desktop_settings = (selected.as_deref() == Some(input.account_id.as_str())
+            && next.desktop_sync.settings.enabled
+            && desktop_eligible)
+            .then(|| next.desktop_sync.settings.clone());
+        anyhow::ensure!(!crate::desktop::profile_is_in_use(&profile),"This profile is in use by Codex desktop or CLI. Finish its work and close that client before importing new auth");
+        crate::codex_replace::replace(
+            &profile,
+            &input.account_id,
+            raw.as_bytes(),
+            fingerprint,
+            || {
+                anyhow::ensure!(!crate::desktop::profile_is_in_use(&profile),"This profile is in use by Codex desktop or CLI. Finish its work and close that client before importing new auth");
+                Ok(())
+            },
+            || {
+                self.store.save(&next)?;
+                *data = next;
+                Ok(())
+            },
+        )?;
+        let mut warning = None;
+        if was_locked {
+            if let Some(account) = data
+                .accounts
+                .iter()
+                .find(|a| a.tool_id == ToolId::Codex && a.id == input.account_id && !a.hidden)
+            {
+                if restore_launcher_file(account, &self.store, &data).is_err()
+                    || account
+                        .launcher_command
+                        .as_ref()
+                        .is_some_and(|name| !crate::tools::launcher_path(name).is_file())
+                {
+                    warning=Some("Auth imported, but its custom command needs repair. Configure the Codex binary and set this profile's command again.".to_string());
+                }
+            }
+        }
+        drop(data);
+        drop(_credential);
+        if let Some(settings) = desktop_settings {
+            if let Err(error) = crate::desktop_recovery::request(self, settings) {
+                if let Ok(mut data) = self.data.lock() {
+                    data.desktop_sync.error = Some(format!(
+                        "Auth imported; desktop handoff could not be queued: {error:#}"
+                    ));
+                    let _ = self.store.save(&data);
+                }
+            }
+        }
+        Ok(warning)
+    }
+
     /// Import an existing Codex OAuth auth.json into a new isolated Switcher profile.
     /// The source is only read; the copied credential is stored with owner-only permissions.
     pub fn import_codex_account(&self, input: ImportCodexAccountInput) -> Result<AppSnapshot> {
@@ -3130,6 +3315,10 @@ impl ManagedState {
     /// Arm / disarm the weekly reserve-quota lock. Disarming unlocks the account (manual unlock);
     /// arming checks the current weekly usage right away, so it can lock immediately.
     pub fn set_weekly_lock(&self, input: SetWeeklyLockInput) -> Result<AppSnapshot> {
+        let _switch = self
+            .account_switch
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Account settings lock unavailable"))?;
         if !input.threshold.is_finite() || !(1.0..=100.0).contains(&input.threshold) {
             anyhow::bail!("The weekly limit must be between 1% and 100%");
         }
@@ -3179,6 +3368,30 @@ impl ManagedState {
         self.snapshot()
     }
 
+    fn notify_current_exhausted(
+        &self,
+        tool: &ToolId,
+        id: &str,
+        app: &AppHandle,
+        expected: &std::collections::BTreeMap<String, String>,
+    ) {
+        let Ok(_switch) = self.account_switch.try_lock() else {
+            return;
+        };
+        let current = self.data.lock().ok().and_then(|data| {
+            if *tool == ToolId::Codex && data.codex_auth_revisions.get(id) != expected.get(id) {
+                return None;
+            }
+            data.accounts
+                .iter()
+                .find(|a| a.tool_id == *tool && a.id == id && a.state == AccountState::Exhausted)
+                .cloned()
+        });
+        if let Some(account) = current {
+            notify_exhausted(app, &account);
+        }
+    }
+
     /// Apply the lock/unlock decisions from a quota refresh. Failures are reported but never fail
     /// the refresh itself — the next refresh retries.
     fn apply_weekly_lock_changes(
@@ -3186,8 +3399,25 @@ impl ManagedState {
         tool_id: &ToolId,
         changes: Vec<(String, bool)>,
         app: Option<&AppHandle>,
+        expected_revisions: &std::collections::BTreeMap<String, String>,
     ) {
+        let Ok(_switch) = self.account_switch.try_lock() else {
+            return;
+        };
         for (account_id, lock) in changes {
+            let current = self.data.lock().ok().is_some_and(|data| {
+                (*tool_id != ToolId::Codex
+                    || data.codex_auth_revisions.get(&account_id)
+                        == expected_revisions.get(&account_id))
+                    && data
+                        .accounts
+                        .iter()
+                        .find(|a| a.tool_id == *tool_id && a.id == account_id)
+                        .is_some_and(|account| weekly_lock_transition(account) == Some(lock))
+            });
+            if !current {
+                continue;
+            }
             let result = if lock {
                 self.lock_account(tool_id, &account_id)
             } else {
@@ -4198,6 +4428,60 @@ fn append_imported_account(store: &Store, data: &mut StoredState, account: Accou
         return Err(error);
     }
     Ok(())
+}
+
+fn codex_replacement_target(
+    store: &Store,
+    data: &StoredState,
+    id: &str,
+) -> Result<std::path::PathBuf> {
+    let account = data
+        .accounts
+        .iter()
+        .find(|a| a.tool_id == ToolId::Codex && a.id == id)
+        .context("Codex profile not found")?;
+    anyhow::ensure!(
+        account.api_provider.is_none(),
+        "Import auth.json is available for Codex subscription profiles only"
+    );
+    Ok(account_config_dir_with_default(
+        store,
+        account,
+        &resolved_default_config_dir(data, &ToolId::Codex),
+    ))
+}
+fn codex_replacement_payload(
+    store: &Store,
+    data: &StoredState,
+    input: &crate::models::ReplaceCodexAuthInput,
+) -> Result<(
+    crate::models::CodexAuthReplacementPreview,
+    std::path::PathBuf,
+    String,
+)> {
+    let profile = codex_replacement_target(store, data, &input.account_id)?;
+    let (raw, auth) = crate::codex_import::load(&input.source)?;
+    let default_dir = resolved_default_config_dir(data, &ToolId::Codex);
+    let mut others = data.clone();
+    others
+        .accounts
+        .retain(|a| a.tool_id != ToolId::Codex || a.id != input.account_id);
+    anyhow::ensure!(!codex_identity_exists(store,&others,&default_dir,crate::quota::codex_account_id_from_auth(&auth).as_deref(),crate::quota::codex_user_id_from_auth(&auth).as_deref(),crate::quota::codex_account_email_from_auth(&auth).as_deref()) && !codex_refresh_token_exists(store,&others,&default_dir,&raw),"This login or refresh credential belongs to another profile. Use that existing profile instead");
+    let old = crate::codex_replace::current_auth(&profile)?;
+    let current_email = old
+        .as_ref()
+        .and_then(|raw| serde_json::from_slice::<serde_json::Value>(raw).ok())
+        .and_then(|auth| crate::quota::codex_account_email_from_auth(&auth));
+    let preview = crate::models::CodexAuthReplacementPreview {
+        current_email,
+        incoming_email: crate::quota::codex_account_email_from_auth(&auth),
+        preview_fingerprint: crate::codex_replace::preview_fingerprint(
+            &input.account_id,
+            old.as_deref().unwrap_or_default(),
+            raw.as_bytes(),
+        ),
+    };
+    Ok((preview, profile, raw))
 }
 
 fn codex_refresh_token_exists(
@@ -5296,6 +5580,196 @@ mod tests {
 
     fn synthetic_account(id: &str, tool: &str, default: bool) -> Account {
         serde_json::from_value(serde_json::json!({"id":id,"toolId":tool,"name":id,"state":"idle","fingerprint":if default {format!("system-default:{tool}")} else {format!("profile:{id}")},"createdAt":"now","updatedAt":"now","isDefault":default})).unwrap()
+    }
+
+    fn replacement_auth(label: &str) -> String {
+        use base64::Engine;
+        let claims = serde_json::json!({"email":format!("{label}@example.invalid"),"exp":4102444800_i64,"https://api.openai.com/auth":{"chatgpt_user_id":format!("user-{label}"),"chatgpt_account_id":"fixture-workspace"}});
+        let token = format!(
+            "e30.{}.synthetic",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(&claims).unwrap())
+        );
+        serde_json::json!({"tokens":{"id_token":token,"access_token":token,"refresh_token":format!("synthetic-refresh-{label}"),"account_id":"fixture-workspace"}}).to_string()
+    }
+    fn replacement_fixture() -> (ManagedState, std::path::PathBuf, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!("profile-auth-replace-{}", Uuid::new_v4()));
+        let store = Store::for_test(root.clone()).unwrap();
+        let profile = store.account_dir(&ToolId::Codex, "existing");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(profile.join("auth.json"), replacement_auth("old")).unwrap();
+        std::fs::write(profile.join("config.toml"), b"retained-config").unwrap();
+        let mut account = synthetic_account("existing", "codex", false);
+        account.name = "Keep profile name".into();
+        account.launcher_command = Some("codex-fixture".into());
+        account.account_email = Some("old@example.invalid".into());
+        let data = StoredState {
+            accounts: vec![account],
+            ..Default::default()
+        };
+        store.save(&data).unwrap();
+        let state = ManagedState {
+            store,
+            api_server: Mutex::new(crate::api_gateway::ApiServerHandle::stopped(
+                &data.api_gateway,
+            )),
+            data: Mutex::new(data),
+            usage_scan: Mutex::new(()),
+            account_switch: Mutex::new(()),
+            priming: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        (state, root, profile)
+    }
+    fn replacement_input(raw: String) -> crate::models::ReplaceCodexAuthInput {
+        crate::models::ReplaceCodexAuthInput {
+            account_id: "existing".into(),
+            source: crate::models::CodexAuthSourceInput {
+                auth_json: Some(raw),
+                auth_file_path: None,
+            },
+            preview_fingerprint: None,
+        }
+    }
+    #[test]
+    fn replaced_login_drops_old_weekly_lock_but_keeps_reserve_settings() {
+        let (state, root, _) = replacement_fixture();
+        state.data.lock().unwrap().accounts[0].weekly_lock = Some(WeeklyLock {
+            enabled: true,
+            threshold: 80.0,
+            locked: true,
+        });
+        let mut input = replacement_input(replacement_auth("new"));
+        input.preview_fingerprint = Some(
+            state
+                .preview_codex_auth_replacement(input.clone())
+                .unwrap()
+                .preview_fingerprint,
+        );
+        state.replace_codex_auth(input).unwrap();
+        let data = state.data.lock().unwrap();
+        let lock = data.accounts[0].weekly_lock.as_ref().unwrap();
+        assert!(lock.enabled);
+        assert_eq!(lock.threshold, 80.0);
+        assert!(!lock.locked);
+        drop(data);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn deferred_old_quota_cannot_lock_the_imported_login() {
+        let (state, root, _) = replacement_fixture();
+        {
+            let mut data = state.data.lock().unwrap();
+            let account = &mut data.accounts[0];
+            account.launcher_command = None;
+            account.quota = codex_with_quota("fixture", 0.0).quota;
+            account.quota.as_mut().unwrap().weekly.percent_used = Some(100.0);
+            account.weekly_lock = Some(WeeklyLock {
+                enabled: true,
+                threshold: 80.0,
+                locked: false,
+            });
+            data.codex_auth_revisions
+                .insert("existing".into(), "new-auth-revision".into());
+        }
+        let old = std::collections::BTreeMap::from([(
+            "existing".to_string(),
+            "old-auth-revision".to_string(),
+        )]);
+        state.apply_weekly_lock_changes(
+            &ToolId::Codex,
+            vec![("existing".into(), true)],
+            None,
+            &old,
+        );
+        assert!(!state.data.lock().unwrap().accounts[0].is_locked());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn importing_different_auth_keeps_same_profile_and_pool() {
+        let (state, root, profile) = replacement_fixture();
+        let active = state.store.active_profile_path(&ToolId::Codex);
+        std::fs::create_dir_all(active.parent().unwrap()).unwrap();
+        std::fs::write(&active, profile.to_string_lossy().as_bytes()).unwrap();
+        let selected_before = std::fs::read(&active).unwrap();
+        std::fs::write(profile.join("history.jsonl"), b"retained-history").unwrap();
+        let mut input = replacement_input(replacement_auth("new"));
+        let preview = state.preview_codex_auth_replacement(input.clone()).unwrap();
+        assert_eq!(
+            preview.current_email.as_deref(),
+            Some("old@example.invalid")
+        );
+        assert_eq!(
+            preview.incoming_email.as_deref(),
+            Some("new@example.invalid")
+        );
+        input.preview_fingerprint = Some(preview.preview_fingerprint);
+        state.replace_codex_auth(input).unwrap();
+        let data = state.data.lock().unwrap();
+        assert_eq!(data.accounts.len(), 1);
+        let account = &data.accounts[0];
+        assert_eq!(account.id, "existing");
+        assert_eq!(account.name, "Keep profile name");
+        assert_eq!(account.launcher_command.as_deref(), Some("codex-fixture"));
+        assert_eq!(
+            account.account_email.as_deref(),
+            Some("new@example.invalid")
+        );
+        assert!(account.quota.is_none());
+        assert_eq!(account.state, AccountState::Active);
+        assert_eq!(std::fs::read(&active).unwrap(), selected_before);
+        assert_eq!(
+            std::fs::read(profile.join("history.jsonl")).unwrap(),
+            b"retained-history"
+        );
+        assert!(data.codex_auth_revisions.get("existing").is_some());
+        assert_eq!(
+            data.codex_user_emails.get("user-old").map(String::as_str),
+            Some("old@example.invalid")
+        );
+        assert_eq!(
+            data.codex_user_emails.get("user-new").map(String::as_str),
+            Some("new@example.invalid")
+        );
+        assert_eq!(
+            std::fs::read(profile.join("config.toml")).unwrap(),
+            b"retained-config"
+        );
+        assert_eq!(
+            std::fs::read_to_string(profile.join("auth.json")).unwrap(),
+            replacement_auth("new")
+        );
+        drop(data);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn replacement_allows_own_login_but_rejects_other_profile_duplicates_and_stale_files() {
+        let (state, root, profile) = replacement_fixture();
+        assert!(state
+            .preview_codex_auth_replacement(replacement_input(replacement_auth("old")))
+            .is_ok());
+        let mut input = replacement_input(replacement_auth("new"));
+        let preview = state.preview_codex_auth_replacement(input.clone()).unwrap();
+        input.preview_fingerprint = Some(preview.preview_fingerprint);
+        input.source.auth_json = Some(replacement_auth("changed"));
+        assert!(state.replace_codex_auth(input).is_err());
+        assert_eq!(
+            std::fs::read_to_string(profile.join("auth.json")).unwrap(),
+            replacement_auth("old")
+        );
+        let other = state.store.account_dir(&ToolId::Codex, "other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("auth.json"), replacement_auth("other")).unwrap();
+        state
+            .data
+            .lock()
+            .unwrap()
+            .accounts
+            .push(synthetic_account("other", "codex", false));
+        assert!(state
+            .preview_codex_auth_replacement(replacement_input(replacement_auth("other")))
+            .is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     fn codex_with_quota(id: &str, percent: f64) -> Account {

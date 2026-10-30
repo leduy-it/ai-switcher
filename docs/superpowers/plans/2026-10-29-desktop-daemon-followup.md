@@ -58,3 +58,5 @@ Files: src/DesktopStatus.tsx, src/desktop-status.css, src/App.tsx, relevant styl
 - Final review covered native queued/unqueued retries, same-turn quota failure between checkpoint and interruption, five-second child cleanup before the native eight-second deadline, unrelated CLI proxies, last-turn user activity, saved destination and repeated selection writes. Added regression coverage for these boundaries.
 
 - Final verification: full suite 182 passed / 3 opt-in ignored; isolated native daemon and actual native GUI ownership tests passed separately; frontend build + 7 UI-state scenarios and 8 native subprocess scenarios pass. Signed release arm64 bundle 0.16.1 native GUI check passed. Installation/relaunch and wide/narrow native visual inspection remain blocked by locked Mac; owner requested to unlock. Installed app remains 0.16.0.
+
+- Later delivery during 0.16.2: UI connectivity recovered. Installed/running 0.16.2 includes this follow-up; compact native layout/modal inspected. Existing 12 accounts/19 credential/config files preserved. Exact minimum-width resize remains unconfirmed; original private desktop still waits for one safe close.
